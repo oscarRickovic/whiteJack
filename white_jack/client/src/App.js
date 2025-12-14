@@ -245,6 +245,14 @@ const App = () => {
     const myWantsRematch = gameState.players[playerId]?.wantsRematch || false;
     const opponentWantsRematch = gameState.players[opponentId]?.wantsRematch || false;
     
+    // Get win counts
+    const myWins = gameState.scores?.[playerId] || 0;
+    const opponentWins = gameState.scores?.[opponentId] || 0;
+    
+    // Check if busted
+    const myBusted = myScore > 21;
+    const opponentBusted = opponentScore > 21;
+    
     // Player can act if it's their turn, they haven't stopped, and game is not over
     const canAct = isMyTurn && !myStopped && !gameState.gameOver;
 
@@ -255,7 +263,8 @@ const App = () => {
             <h1 className="game-title">♠ Blackjack ♥</h1>
             <div className="game-info">
               <div className="room-code">Room: {roomId}</div>
-              <div className="deck-info">Cards in Deck: {gameState.cardsRemaining || 0}</div>
+              <div className="score-tracker">{myWins} - {opponentWins}</div>
+              <div className="deck-info">Deck: {gameState.cardsRemaining || 0}</div>
             </div>
           </div>
 
@@ -278,7 +287,10 @@ const App = () => {
                 )}
               </div>
               {gameState.gameOver && (
-                <div className="score-badge">Score: {opponentScore}</div>
+                <div className={opponentBusted ? "score-badge score-busted" : "score-badge"}>
+                  Score: {opponentScore}
+                  {opponentBusted && " (BUST!)"}
+                </div>
               )}
             </div>
             <div className="cards-container">
@@ -296,12 +308,22 @@ const App = () => {
                    gameState.winner === 'draw' ? '🤝 Draw!' : '😢 You Lose!'}
                 </div>
                 <div className="final-score">
-                  Your Score: <strong>{myScore}</strong> | Opponent: <strong>{opponentScore}</strong>
+                  Your Score: <strong className={myBusted ? "busted-text" : ""}>{myScore}{myBusted && " (BUST)"}</strong> | 
+                  Opponent: <strong className={opponentBusted ? "busted-text" : ""}>{opponentScore}{opponentBusted && " (BUST)"}</strong>
+                </div>
+                <div className="match-score">
+                  Match Score: <strong>{myWins} - {opponentWins}</strong>
                 </div>
                 
                 {myWantsRematch && !opponentWantsRematch && (
                   <div className="waiting-rematch">
                     ⏳ Waiting for opponent to accept rematch...
+                  </div>
+                )}
+                
+                {!myWantsRematch && opponentWantsRematch && (
+                  <div className="opponent-waiting-rematch">
+                    🎮 Opponent wants to play again!
                   </div>
                 )}
                 
@@ -322,6 +344,10 @@ const App = () => {
               <div className="turn-indicator">
                 {myStopped && opponentStopped ? (
                   <div className="turn-text">⏳ Calculating winner...</div>
+                ) : myBusted ? (
+                  <div className="turn-text bust-text">💥 You Busted! Opponent is playing...</div>
+                ) : opponentBusted ? (
+                  <div className="turn-text active">💥 Opponent Busted! Your turn!</div>
                 ) : myStopped ? (
                   <div className="turn-text">⏸️ You stopped. Opponent is playing...</div>
                 ) : opponentStopped ? (
@@ -346,7 +372,10 @@ const App = () => {
                   <span className="rematch-indicator">✓ Ready</span>
                 )}
               </div>
-              <div className="score-badge">Score: {myScore}</div>
+              <div className={myBusted ? "score-badge score-busted" : "score-badge"}>
+                Score: {myScore}
+                {myBusted && " (BUST!)"}
+              </div>
             </div>
             <div className="cards-container">
               {myCards.map((card, idx) => (
@@ -372,13 +401,19 @@ const App = () => {
               </div>
             )}
             
-            {myStopped && !gameState.gameOver && !opponentStopped && (
+            {myBusted && !gameState.gameOver && (
+              <div className="bust-message">
+                💥 You Busted! (Over 21) - Waiting for opponent...
+              </div>
+            )}
+            
+            {myStopped && !gameState.gameOver && !opponentStopped && !myBusted && (
               <div className="waiting-message">
                 ⏸️ You stopped. Waiting for opponent...
               </div>
             )}
             
-            {!canAct && !myStopped && !gameState.gameOver && (
+            {!canAct && !myStopped && !gameState.gameOver && !myBusted && (
               <div className="waiting-message">
                 ⏳ Wait for your turn...
               </div>

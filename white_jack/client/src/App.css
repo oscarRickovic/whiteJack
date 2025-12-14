@@ -596,6 +596,97 @@ body {
   transform: none;
 }
 
+/* Score Tracker */
+.score-tracker {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #fbbf24;
+  padding: 0.5rem 1rem;
+  background: rgba(251, 191, 36, 0.1);
+  border: 2px solid rgba(251, 191, 36, 0.3);
+  border-radius: 0.5rem;
+}
+
+/* Bust Styles */
+.score-busted {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: #ef4444 !important;
+  animation: pulse 2s infinite;
+}
+
+.busted-text {
+  color: #ef4444 !important;
+  font-weight: bold;
+}
+
+.bust-text {
+  color: #ef4444 !important;
+}
+
+.bust-message {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 2px solid rgba(239, 68, 68, 0.3);
+  border-radius: 0.5rem;
+  color: #ef4444;
+  font-weight: 600;
+  text-align: center;
+}
+
+.match-score {
+  margin: 0.5rem 0;
+  font-size: 1.1rem;
+  color: #fbbf24;
+}
+
+.match-score strong {
+  font-size: 1.3rem;
+}
+
+/* Waiting Rematch */
+.waiting-rematch {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 0.5rem;
+  color: #3b82f6;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.rematch-indicator {
+  margin-left: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: #10b981;
+  color: white;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.btn-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #10b981 !important;
+}
+
+.btn-disabled:hover {
+  background: #10b981 !important;
+  transform: none;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .title {

@@ -83,6 +83,54 @@ const generateRoomId = () => {
   return roomId;
 };
 
+// Check if game should end and calculate winner
+const checkGameEnd = (room) => {
+  const p1 = room.gameState.players.player1;
+  const p2 = room.gameState.players.player2;
+  
+  // Check if anyone busted (over 21)
+  const p1Busted = p1.score > 21;
+  const p2Busted = p2.score > 21;
+  
+  // If someone busted, game ends immediately
+  if (p1Busted || p2Busted) {
+    room.gameState.gameOver = true;
+    
+    if (p1Busted && p2Busted) {
+      room.gameState.winner = 'draw';
+    } else if (p1Busted) {
+      room.gameState.winner = 'player2';
+      room.scores.player2++;
+    } else if (p2Busted) {
+      room.gameState.winner = 'player1';
+      room.scores.player1++;
+    }
+    
+    room.gameState.scores = room.scores;
+    return true;
+  }
+  
+  // If both players stopped, calculate winner
+  if (p1.stopped && p2.stopped) {
+    room.gameState.gameOver = true;
+    
+    if (p1.score > p2.score) {
+      room.gameState.winner = 'player1';
+      room.scores.player1++;
+    } else if (p2.score > p1.score) {
+      room.gameState.winner = 'player2';
+      room.scores.player2++;
+    } else {
+      room.gameState.winner = 'draw';
+    }
+    
+    room.gameState.scores = room.scores;
+    return true;
+  }
+  
+  return false;
+};
+
 // Start a new round in existing room
 const startNewRound = (room) => {
   // Check if we need to shuffle (less than 10 cards left)
@@ -120,7 +168,8 @@ const startNewRound = (room) => {
     gameOver: false,
     winner: null,
     deckShuffled,
-    cardsRemaining: room.deck.length
+    cardsRemaining: room.deck.length,
+    scores: room.scores
   };
   
   return room.gameState;
@@ -139,6 +188,10 @@ io.on('connection', (socket) => {
       player2: null,
       deck: shuffleDeck(createDeck()),
       roundNumber: 0,
+      scores: {
+        player1: 0,
+        player2: 0
+      },
       gameState: {
         players: {
           player1: {
@@ -154,7 +207,11 @@ io.on('connection', (socket) => {
         gameOver: false,
         winner: null,
         deckShuffled: false,
-        cardsRemaining: 52
+        cardsRemaining: 52,
+        scores: {
+          player1: 0,
+          player2: 0
+        }
       }
     };
     
@@ -238,21 +295,34 @@ io.on('connection', (socket) => {
     room.gameState.players[playerId].score = calculateScore(room.gameState.players[playerId].cards);
     room.gameState.cardsRemaining = room.deck.length;
     
-    // Determine next turn
-    const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
+    // Check if player busted (over 21)
+    const busted = room.gameState.players[playerId].score > 21;
     
-    // If the other player has stopped, keep the turn with current player
-    // Otherwise, switch turn
-    if (room.gameState.players[otherPlayer].stopped) {
-      room.gameState.currentTurn = playerId;
-    } else {
-      room.gameState.currentTurn = otherPlayer;
+    if (busted) {
+      // Player busted - automatically stop them
+      room.gameState.players[playerId].stopped = true;
+    }
+    
+    // Check if game should end
+    const gameEnded = checkGameEnd(room);
+    
+    if (!gameEnded && !busted) {
+      // Determine next turn
+      const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
+      
+      // If the other player has stopped, keep the turn with current player
+      // Otherwise, switch turn
+      if (room.gameState.players[otherPlayer].stopped) {
+        room.gameState.currentTurn = playerId;
+      } else {
+        room.gameState.currentTurn = otherPlayer;
+      }
     }
     
     // Broadcast to both players
     io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
     
-    console.log(`${playerId} hit in room ${roomId}. Cards remaining: ${room.deck.length}`);
+    console.log(`${playerId} hit in room ${roomId}. Score: ${room.gameState.players[playerId].score}. Cards remaining: ${room.deck.length}`);
   });
 
   // Stand (Stop)
@@ -277,34 +347,11 @@ io.on('connection', (socket) => {
     
     room.gameState.players[playerId].stopped = true;
     
-    const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
+    // Check if game should end
+    const gameEnded = checkGameEnd(room);
     
-    // Check if both players stopped
-    if (room.gameState.players[otherPlayer].stopped) {
-      // Game over - calculate winner
-      const p1Score = room.gameState.players.player1.score;
-      const p2Score = room.gameState.players.player2.score;
-      
-      let winner = null;
-      if (p1Score > 21 && p2Score > 21) {
-        winner = 'draw';
-      } else if (p1Score > 21) {
-        winner = 'player2';
-      } else if (p2Score > 21) {
-        winner = 'player1';
-      } else if (p1Score > p2Score) {
-        winner = 'player1';
-      } else if (p2Score > p1Score) {
-        winner = 'player2';
-      } else {
-        winner = 'draw';
-      }
-      
-      room.gameState.gameOver = true;
-      room.gameState.winner = winner;
-      
-      console.log(`Round over in room ${roomId}. Winner: ${winner}`);
-    } else {
+    if (!gameEnded) {
+      const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
       // Other player hasn't stopped yet, give them the turn
       room.gameState.currentTurn = otherPlayer;
     }
@@ -339,7 +386,7 @@ io.on('connection', (socket) => {
       // Both players ready - start new round
       const gameState = startNewRound(room);
       io.to(roomId).emit('NEW_ROUND', { gameState });
-      console.log(`New round started in room ${roomId}. Round #${room.roundNumber}. Cards remaining: ${room.deck.length}`);
+      console.log(`New round started in room ${roomId}. Round #${room.roundNumber}. Score: ${room.scores.player1}-${room.scores.player2}`);
     } else {
       // This player is ready, waiting for other player
       io.to(roomId).emit('REMATCH_STATUS', { 
