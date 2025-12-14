@@ -17,7 +17,10 @@ const App = () => {
 
   useEffect(() => {
     // Connect to WebSocket server
-    ws.current = io(SOCKET_URL);
+    ws.current = io(SOCKET_URL, {
+      transports: ['websocket'],
+      withCredentials: true,
+    });
 
     ws.current.on('connect', () => {
       console.log('Connected to server');
