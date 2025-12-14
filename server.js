@@ -105,12 +105,14 @@ const startNewRound = (room) => {
       player1: {
         cards: player1Cards,
         stopped: false,
-        score: calculateScore(player1Cards)
+        score: calculateScore(player1Cards),
+        wantsRematch: false
       },
       player2: {
         cards: player2Cards,
         stopped: false,
-        score: calculateScore(player2Cards)
+        score: calculateScore(player2Cards),
+        wantsRematch: false
       }
     },
     currentTurn: firstPlayer,
@@ -142,7 +144,8 @@ io.on('connection', (socket) => {
           player1: {
             cards: [],
             stopped: false,
-            score: 0
+            score: 0,
+            wantsRematch: false
           },
           player2: null
         },
@@ -212,6 +215,12 @@ io.on('connection', (socket) => {
       return;
     }
     
+    // CRITICAL: Check if it's actually this player's turn
+    if (room.gameState.currentTurn !== playerId) {
+      socket.emit('ERROR', { message: 'Not your turn!' });
+      return;
+    }
+    
     // Check if this player has already stopped
     if (room.gameState.players[playerId].stopped) {
       socket.emit('ERROR', { message: 'You already stood' });
@@ -251,6 +260,12 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     
     if (!room || !room.gameState.gameStarted || room.gameState.gameOver) {
+      return;
+    }
+    
+    // CRITICAL: Check if it's actually this player's turn
+    if (room.gameState.currentTurn !== playerId) {
+      socket.emit('ERROR', { message: 'Not your turn!' });
       return;
     }
     
@@ -300,8 +315,8 @@ io.on('connection', (socket) => {
     console.log(`${playerId} stood in room ${roomId}`);
   });
 
-  // Play Again (New Round)
-  socket.on('PLAY_AGAIN', ({ roomId }) => {
+  // Play Again (New Round) - Modified to require both players
+  socket.on('PLAY_AGAIN', ({ roomId, playerId }) => {
     const room = rooms.get(roomId);
     
     if (!room || !room.player2) {
@@ -309,13 +324,29 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Start new round
-    const gameState = startNewRound(room);
+    if (!room.gameState.gameOver) {
+      socket.emit('ERROR', { message: 'Game is not over yet' });
+      return;
+    }
     
-    // Broadcast to both players
-    io.to(roomId).emit('NEW_ROUND', { gameState });
+    // Mark this player as wanting a rematch
+    room.gameState.players[playerId].wantsRematch = true;
     
-    console.log(`New round started in room ${roomId}. Round #${room.roundNumber}. Cards remaining: ${room.deck.length}`);
+    const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
+    
+    // Check if both players want rematch
+    if (room.gameState.players[otherPlayer].wantsRematch) {
+      // Both players ready - start new round
+      const gameState = startNewRound(room);
+      io.to(roomId).emit('NEW_ROUND', { gameState });
+      console.log(`New round started in room ${roomId}. Round #${room.roundNumber}. Cards remaining: ${room.deck.length}`);
+    } else {
+      // This player is ready, waiting for other player
+      io.to(roomId).emit('REMATCH_STATUS', { 
+        gameState: room.gameState 
+      });
+      console.log(`${playerId} wants rematch in room ${roomId}. Waiting for other player.`);
+    }
   });
 
   // Leave Room

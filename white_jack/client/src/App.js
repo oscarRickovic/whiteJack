@@ -58,6 +58,10 @@ const App = () => {
       setGameState(gameState);
     });
 
+    ws.current.on('REMATCH_STATUS', ({ gameState }) => {
+      setGameState(gameState);
+    });
+
     ws.current.on('ERROR', ({ message }) => {
       setError(message);
       setTimeout(() => setError(''), 3000);
@@ -99,7 +103,7 @@ const App = () => {
   };
 
   const playAgain = () => {
-    ws.current.emit('PLAY_AGAIN', { roomId });
+    ws.current.emit('PLAY_AGAIN', { roomId, playerId });
   };
 
   const leaveRoom = () => {
@@ -238,9 +242,11 @@ const App = () => {
     const opponentScore = gameState.players[opponentId]?.score || 0;
     const myStopped = gameState.players[playerId]?.stopped || false;
     const opponentStopped = gameState.players[opponentId]?.stopped || false;
+    const myWantsRematch = gameState.players[playerId]?.wantsRematch || false;
+    const opponentWantsRematch = gameState.players[opponentId]?.wantsRematch || false;
     
-    // Player can act if they haven't stopped yet
-    const canAct = !myStopped && !gameState.gameOver;
+    // Player can act if it's their turn, they haven't stopped, and game is not over
+    const canAct = isMyTurn && !myStopped && !gameState.gameOver;
 
     return (
       <div className="screen-container">
@@ -267,6 +273,9 @@ const App = () => {
                   <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                 </svg>
                 Opponent
+                {gameState.gameOver && opponentWantsRematch && (
+                  <span className="rematch-indicator">✓ Ready</span>
+                )}
               </div>
               {gameState.gameOver && (
                 <div className="score-badge">Score: {opponentScore}</div>
@@ -289,9 +298,20 @@ const App = () => {
                 <div className="final-score">
                   Your Score: <strong>{myScore}</strong> | Opponent: <strong>{opponentScore}</strong>
                 </div>
+                
+                {myWantsRematch && !opponentWantsRematch && (
+                  <div className="waiting-rematch">
+                    ⏳ Waiting for opponent to accept rematch...
+                  </div>
+                )}
+                
                 <div className="game-over-buttons">
-                  <button onClick={playAgain} className="btn btn-play-again">
-                    Play Again
+                  <button 
+                    onClick={playAgain} 
+                    className={myWantsRematch ? "btn btn-play-again btn-disabled" : "btn btn-play-again"}
+                    disabled={myWantsRematch}
+                  >
+                    {myWantsRematch ? '✓ Ready to Play' : 'Play Again'}
                   </button>
                   <button onClick={leaveRoom} className="btn btn-leave">
                     Leave Room
@@ -322,6 +342,9 @@ const App = () => {
                   <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                 </svg>
                 You
+                {gameState.gameOver && myWantsRematch && (
+                  <span className="rematch-indicator">✓ Ready</span>
+                )}
               </div>
               <div className="score-badge">Score: {myScore}</div>
             </div>
@@ -352,6 +375,12 @@ const App = () => {
             {myStopped && !gameState.gameOver && !opponentStopped && (
               <div className="waiting-message">
                 ⏸️ You stopped. Waiting for opponent...
+              </div>
+            )}
+            
+            {!canAct && !myStopped && !gameState.gameOver && (
+              <div className="waiting-message">
+                ⏳ Wait for your turn...
               </div>
             )}
           </div>

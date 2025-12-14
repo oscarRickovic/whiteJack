@@ -564,6 +564,38 @@ body {
   gap: 12px;
 }
 
+.waiting-rematch {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 0.5rem;
+  color: #3b82f6;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.rematch-indicator {
+  margin-left: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: #10b981;
+  color: white;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.btn-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #10b981 !important;
+}
+
+.btn-disabled:hover {
+  background: #10b981 !important;
+  transform: none;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .title {
