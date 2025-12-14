@@ -92,29 +92,26 @@ const checkGameEnd = (room) => {
   const p1Busted = p1.score > 21;
   const p2Busted = p2.score > 21;
   
-  // If someone busted, game ends immediately
-  if (p1Busted || p2Busted) {
-    room.gameState.gameOver = true;
-    
-    if (p1Busted && p2Busted) {
-      room.gameState.winner = 'draw';
-    } else if (p1Busted) {
-      room.gameState.winner = 'player2';
-      room.scores.player2++;
-    } else if (p2Busted) {
-      room.gameState.winner = 'player1';
-      room.scores.player1++;
-    }
-    
-    room.gameState.scores = room.scores;
-    return true;
-  }
-  
-  // If both players stopped, calculate winner
+  // Game only ends when BOTH players have stopped (either manually or by busting)
   if (p1.stopped && p2.stopped) {
     room.gameState.gameOver = true;
     
-    if (p1.score > p2.score) {
+    // If both busted, it's a draw
+    if (p1Busted && p2Busted) {
+      room.gameState.winner = 'draw';
+    } 
+    // If only player 1 busted, player 2 wins
+    else if (p1Busted) {
+      room.gameState.winner = 'player2';
+      room.scores.player2++;
+    } 
+    // If only player 2 busted, player 1 wins
+    else if (p2Busted) {
+      room.gameState.winner = 'player1';
+      room.scores.player1++;
+    }
+    // If neither busted, compare scores
+    else if (p1.score > p2.score) {
       room.gameState.winner = 'player1';
       room.scores.player1++;
     } else if (p2.score > p1.score) {
@@ -303,11 +300,11 @@ io.on('connection', (socket) => {
       room.gameState.players[playerId].stopped = true;
     }
     
-    // Check if game should end
+    // Check if game should end (both players stopped)
     const gameEnded = checkGameEnd(room);
     
-    if (!gameEnded && !busted) {
-      // Determine next turn
+    if (!gameEnded) {
+      // Game continues - determine next turn
       const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
       
       // If the other player has stopped, keep the turn with current player
@@ -322,7 +319,7 @@ io.on('connection', (socket) => {
     // Broadcast to both players
     io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
     
-    console.log(`${playerId} hit in room ${roomId}. Score: ${room.gameState.players[playerId].score}. Cards remaining: ${room.deck.length}`);
+    console.log(`${playerId} hit in room ${roomId}. Score: ${room.gameState.players[playerId].score}${busted ? ' (BUSTED)' : ''}. Cards remaining: ${room.deck.length}`);
   });
 
   // Stand (Stop)

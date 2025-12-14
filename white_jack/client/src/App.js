@@ -346,8 +346,6 @@ const App = () => {
                   <div className="turn-text">⏳ Calculating winner...</div>
                 ) : myBusted ? (
                   <div className="turn-text bust-text">💥 You Busted! Opponent is playing...</div>
-                ) : opponentBusted ? (
-                  <div className="turn-text active">💥 Opponent Busted! Your turn!</div>
                 ) : myStopped ? (
                   <div className="turn-text">⏸️ You stopped. Opponent is playing...</div>
                 ) : opponentStopped ? (
