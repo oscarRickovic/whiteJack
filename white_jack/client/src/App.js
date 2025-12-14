@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
 
-const SOCKET_URL = 'http://localhost:5000';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
 
 const App = () => {
   const [screen, setScreen] = useState('home');
