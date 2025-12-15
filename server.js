@@ -134,7 +134,7 @@ const startNewRound = (room) => {
   let deckShuffled = false;
   if (room.deck.length < 10) {
     room.deck = shuffleDeck(createDeck());
-    deckShuffled = true;
+    //deckShuffled = true;
   }
   
   // Draw 4 cards for the new round
@@ -284,7 +284,7 @@ io.on('connection', (socket) => {
     // Check if deck is empty
     if (room.deck.length === 0) {
       room.deck = shuffleDeck(createDeck());
-      room.gameState.deckShuffled = true;
+      //room.gameState.deckShuffled = true;
     }
     
     const newCard = room.deck.pop();
