@@ -23,6 +23,17 @@ const io = socketIo(server, {
 // Store rooms and game states
 const rooms = new Map();
 
+// Special card types
+const specialCardTypes = [
+  { id: 'swap', name: 'The Swap' },
+  { id: 'peek', name: 'The Peek' },
+  { id: 'oracle', name: 'The Oracle' },
+  { id: 'statistic', name: 'The Statistic' },
+  { id: 'glitch', name: 'The Glitch' },
+  { id: 'moon', name: 'To The Moon' },
+  { id: 'bonus', name: 'Fan Card Bonus' }
+];
+
 // Create a full deck of 52 cards
 const createDeck = () => {
   const suits = ['♠', '♥', '♦', '♣'];
@@ -83,6 +94,13 @@ const generateRoomId = () => {
   return roomId;
 };
 
+// Assign random special cards to players
+const assignSpecialCards = () => {
+  const numCards = Math.random() > 0.5 ? 2 : 1;
+  const shuffled = shuffleDeck([...specialCardTypes]);
+  return shuffled.slice(0, numCards).map(sc => ({ ...sc, used: false }));
+};
+
 // Check if game should end and calculate winner
 const checkGameEnd = (room) => {
   const p1 = room.gameState.players.player1;
@@ -134,12 +152,16 @@ const startNewRound = (room) => {
   let deckShuffled = false;
   if (room.deck.length < 10) {
     room.deck = shuffleDeck(createDeck());
-    //deckShuffled = true;
+    deckShuffled = true;
   }
   
   // Draw 4 cards for the new round
   const player1Cards = [room.deck.pop(), room.deck.pop()];
   const player2Cards = [room.deck.pop(), room.deck.pop()];
+  
+  // Assign special cards to both players
+  const player1SpecialCards = assignSpecialCards();
+  const player2SpecialCards = assignSpecialCards();
   
   // Alternate who goes first
   room.roundNumber++;
@@ -151,13 +173,15 @@ const startNewRound = (room) => {
         cards: player1Cards,
         stopped: false,
         score: calculateScore(player1Cards),
-        wantsRematch: false
+        wantsRematch: false,
+        specialCards: player1SpecialCards
       },
       player2: {
         cards: player2Cards,
         stopped: false,
         score: calculateScore(player2Cards),
-        wantsRematch: false
+        wantsRematch: false,
+        specialCards: player2SpecialCards
       }
     },
     currentTurn: firstPlayer,
@@ -166,7 +190,10 @@ const startNewRound = (room) => {
     winner: null,
     deckShuffled,
     cardsRemaining: room.deck.length,
-    scores: room.scores
+    scores: room.scores,
+    revealedNextCard: null,
+    revealedOpponentCard: null,
+    deckStats: null
   };
   
   return room.gameState;
@@ -176,7 +203,7 @@ io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
   // Create Room
-  socket.on('CREATE_ROOM', () => {
+  socket.on('CREATE_ROOM', ({ bet }) => {
     const roomId = generateRoomId();
     
     const room = {
@@ -185,6 +212,7 @@ io.on('connection', (socket) => {
       player2: null,
       deck: shuffleDeck(createDeck()),
       roundNumber: 0,
+      bet: bet || 5,
       scores: {
         player1: 0,
         player2: 0
@@ -195,7 +223,8 @@ io.on('connection', (socket) => {
             cards: [],
             stopped: false,
             score: 0,
-            wantsRematch: false
+            wantsRematch: false,
+            specialCards: []
           },
           player2: null
         },
@@ -208,7 +237,10 @@ io.on('connection', (socket) => {
         scores: {
           player1: 0,
           player2: 0
-        }
+        },
+        revealedNextCard: null,
+        revealedOpponentCard: null,
+        deckStats: null
       }
     };
     
@@ -221,7 +253,7 @@ io.on('connection', (socket) => {
       gameState: room.gameState 
     });
     
-    console.log(`Room ${roomId} created by ${socket.id}`);
+    console.log(`Room ${roomId} created by ${socket.id} with bet ${bet}`);
   });
 
   // Join Room
@@ -258,7 +290,7 @@ io.on('connection', (socket) => {
       gameState 
     });
     
-    console.log(`Player 2 joined room ${roomId}. Game started!`);
+    console.log(`Player 2 joined room ${roomId}. Game started with bet ${room.bet}!`);
   });
 
   // Hit (Draw Card)
@@ -269,7 +301,7 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // CRITICAL: Check if it's actually this player's turn
+    // Check if it's actually this player's turn
     if (room.gameState.currentTurn !== playerId) {
       socket.emit('ERROR', { message: 'Not your turn!' });
       return;
@@ -284,13 +316,15 @@ io.on('connection', (socket) => {
     // Check if deck is empty
     if (room.deck.length === 0) {
       room.deck = shuffleDeck(createDeck());
-      //room.gameState.deckShuffled = true;
     }
     
     const newCard = room.deck.pop();
     room.gameState.players[playerId].cards.push(newCard);
     room.gameState.players[playerId].score = calculateScore(room.gameState.players[playerId].cards);
     room.gameState.cardsRemaining = room.deck.length;
+    
+    // Clear any revealed cards from special abilities
+    room.gameState.revealedNextCard = null;
     
     // Check if player busted (over 21)
     const busted = room.gameState.players[playerId].score > 21;
@@ -330,7 +364,7 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // CRITICAL: Check if it's actually this player's turn
+    // Check if it's actually this player's turn
     if (room.gameState.currentTurn !== playerId) {
       socket.emit('ERROR', { message: 'Not your turn!' });
       return;
@@ -359,7 +393,101 @@ io.on('connection', (socket) => {
     console.log(`${playerId} stood in room ${roomId}`);
   });
 
-  // Play Again (New Round) - Modified to require both players
+  // Use Special Card
+  socket.on('USE_SPECIAL_CARD', ({ roomId, playerId, cardId }) => {
+    const room = rooms.get(roomId);
+    
+    if (!room || !room.gameState.gameStarted || room.gameState.gameOver) {
+      return;
+    }
+
+    const player = room.gameState.players[playerId];
+    const specialCard = player.specialCards.find(sc => sc.id === cardId);
+    
+    if (!specialCard || specialCard.used) {
+      socket.emit('ERROR', { message: 'Special card not available' });
+      return;
+    }
+
+    // Mark card as used
+    specialCard.used = true;
+    let message = '';
+
+    const otherPlayerId = playerId === 'player1' ? 'player2' : 'player1';
+    const otherPlayer = room.gameState.players[otherPlayerId];
+
+    switch (cardId) {
+      case 'swap':
+        if (player.cards.length > 0 && otherPlayer.cards.length > 1) {
+          const pCardIdx = Math.floor(Math.random() * player.cards.length);
+          const oCardIdx = Math.floor(Math.random() * (otherPlayer.cards.length - 1)) + 1;
+          
+          const tempCard = player.cards[pCardIdx];
+          player.cards[pCardIdx] = otherPlayer.cards[oCardIdx];
+          otherPlayer.cards[oCardIdx] = tempCard;
+          
+          player.score = calculateScore(player.cards);
+          otherPlayer.score = calculateScore(otherPlayer.cards);
+          message = '🔄 Cards Swapped!';
+        }
+        break;
+
+      case 'peek':
+        if (room.deck.length > 0) {
+          room.gameState.revealedNextCard = room.deck[room.deck.length - 1];
+          message = `👁️ Next Card: ${room.gameState.revealedNextCard.value}${room.gameState.revealedNextCard.suit}`;
+        }
+        break;
+
+      case 'oracle':
+        room.gameState.revealedOpponentCard = otherPlayer.cards[0];
+        message = `🔮 Opponent's Hidden: ${room.gameState.revealedOpponentCard.value}${room.gameState.revealedOpponentCard.suit}`;
+        break;
+
+      case 'statistic':
+        const stats = {};
+        room.deck.forEach(card => {
+          const key = card.value;
+          stats[key] = (stats[key] || 0) + 1;
+        });
+        room.gameState.deckStats = stats;
+        message = '📊 Deck Stats Revealed!';
+        break;
+
+      case 'glitch':
+        if (otherPlayer.cards.length > 1) {
+          const idx = Math.floor(Math.random() * (otherPlayer.cards.length - 1)) + 1;
+          otherPlayer.cards[idx].numValue = Math.floor(Math.random() * 11) + 1;
+          otherPlayer.score = calculateScore(otherPlayer.cards);
+          message = '⚡ Glitch Applied to Opponent!';
+        }
+        break;
+
+      case 'moon':
+        if (player.cards.length > 0) {
+          const idx = Math.floor(Math.random() * player.cards.length);
+          player.cards[idx].numValue = 10; // Boost to 10
+          player.score = calculateScore(player.cards);
+          message = '🚀 Card Boosted to 10!';
+        }
+        break;
+
+      case 'bonus':
+        const bonus = Math.floor(Math.random() * 16) + 5;
+        message = `🎁 Bonus: +${bonus} Tokens!`;
+        break;
+    }
+
+    // Broadcast to the player who used the card
+    socket.emit('SPECIAL_CARD_RESULT', { gameState: room.gameState, message });
+    
+    // Broadcast game state to other player (without the message)
+    io.to(otherPlayerId === 'player1' ? room.player1 : room.player2).emit('GAME_UPDATE', { gameState: room.gameState });
+    
+    console.log(`${playerId} used special card ${cardId} in room ${roomId}`);
+  });
+
+  // Play Again (New Round)
   socket.on('PLAY_AGAIN', ({ roomId, playerId }) => {
     const room = rooms.get(roomId);
     

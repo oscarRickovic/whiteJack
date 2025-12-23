@@ -12,11 +12,91 @@ const App = () => {
   const [gameState, setGameState] = useState(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
-  const [showShuffleNotice, setShowShuffleNotice] = useState(false);
+  const [notification, setNotification] = useState('');
+  const [currentBet, setCurrentBet] = useState(0);
+  const [showSpecialCardMenu, setShowSpecialCardMenu] = useState(false);
+  const [selectedSpecialCard, setSelectedSpecialCard] = useState(null);
   const ws = useRef(null);
 
+  // Player data stored in localStorage
+  const [playerData, setPlayerData] = useState(() => {
+    const saved = localStorage.getItem('blackjackRealmsPlayer');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    return {
+      tokens: 300,
+      level: 1,
+      rank: 'Noob',
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0,
+      dailyStreak: 0,
+      lastLogin: null
+    };
+  });
+
+  const ranks = ['Noob', 'Beginner', 'Skilled', 'Advanced', 'Pro', 'Elite', 'Master', 'Grandmaster', 'Legendary', 'Mythic God'];
+
+  const specialCardTypes = [
+    { id: 'swap', name: 'The Swap', icon: '🔄', color: 'purple-pink', description: 'Trade cards with opponent' },
+    { id: 'peek', name: 'The Peek', icon: '👁️', color: 'blue-cyan', description: 'See next deck card' },
+    { id: 'oracle', name: 'The Oracle', icon: '🔮', color: 'indigo-purple', description: "Reveal opponent's hidden card" },
+    { id: 'statistic', name: 'The Statistic', icon: '📊', color: 'green-emerald', description: 'View deck statistics' },
+    { id: 'glitch', name: 'The Glitch', icon: '⚡', color: 'red-orange', description: "Randomize opponent's card" },
+    { id: 'moon', name: 'To The Moon', icon: '🚀', color: 'yellow-amber', description: 'Change your card value' },
+    { id: 'bonus', name: 'Fan Card Bonus', icon: '🎁', color: 'pink-rose', description: 'Gain 5-20 tokens' }
+  ];
+
+  // Save player data to localStorage whenever it changes
   useEffect(() => {
-    // Connect to WebSocket server
+    localStorage.setItem('blackjackRealmsPlayer', JSON.stringify(playerData));
+  }, [playerData]);
+
+  useEffect(() => {
+    checkDailyBonus();
+  }, []);
+
+  const checkDailyBonus = () => {
+    const today = new Date().toDateString();
+    const lastLogin = playerData.lastLogin;
+    
+    if (lastLogin !== today) {
+      const yesterday = new Date(Date.now() - 86400000).toDateString();
+      const newStreak = lastLogin === yesterday ? playerData.dailyStreak + 1 : 1;
+      
+      let bonus = 100;
+      let levelBonus = false;
+      
+      if (newStreak === 7) {
+        bonus = 1100;
+        levelBonus = true;
+        showNotification('🎉 7-Day Streak! +1000 Bonus Tokens + Level Up!');
+      } else {
+        showNotification(`🎁 Daily Bonus: +${bonus} Tokens! Streak: ${newStreak} days`);
+      }
+      
+      setPlayerData(prev => {
+        const newLevel = levelBonus ? prev.level + 1 : prev.level;
+        const newRank = ranks[Math.min(newLevel - 1, ranks.length - 1)];
+        return {
+          ...prev,
+          tokens: prev.tokens + bonus,
+          dailyStreak: newStreak,
+          lastLogin: today,
+          level: newLevel,
+          rank: newRank
+        };
+      });
+    }
+  };
+
+  const showNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(''), 4000);
+  };
+
+  useEffect(() => {
     ws.current = io(SOCKET_URL, {
       transports: ['websocket'],
       withCredentials: true,
@@ -41,21 +121,18 @@ const App = () => {
     });
 
     ws.current.on('GAME_UPDATE', ({ gameState }) => {
-      // Check if deck was shuffled
-      if (gameState.deckShuffled && !showShuffleNotice) {
-        setShowShuffleNotice(true);
-        setTimeout(() => setShowShuffleNotice(false), 3000);
-      }
       setGameState(gameState);
     });
 
     ws.current.on('NEW_ROUND', ({ gameState }) => {
-      // Check if deck was shuffled
-      if (gameState.deckShuffled) {
-        setShowShuffleNotice(true);
-        setTimeout(() => setShowShuffleNotice(false), 3000);
-      }
       setGameState(gameState);
+      setShowSpecialCardMenu(false);
+      setSelectedSpecialCard(null);
+    });
+
+    ws.current.on('SPECIAL_CARD_RESULT', ({ gameState, message }) => {
+      setGameState(gameState);
+      if (message) showNotification(message);
     });
 
     ws.current.on('REMATCH_STATUS', ({ gameState }) => {
@@ -82,10 +159,16 @@ const App = () => {
         ws.current.disconnect();
       }
     };
-  }, [showShuffleNotice]);
+  }, []);
 
-  const createRoom = () => {
-    ws.current.emit('CREATE_ROOM');
+  const createRoom = (bet) => {
+    if (playerData.tokens < bet) {
+      showNotification('❌ Not enough tokens!');
+      return;
+    }
+    setCurrentBet(bet);
+    setPlayerData(prev => ({ ...prev, tokens: prev.tokens - bet }));
+    ws.current.emit('CREATE_ROOM', { bet });
   };
 
   const joinRoom = () => {
@@ -102,7 +185,16 @@ const App = () => {
     ws.current.emit('STAND', { roomId, playerId });
   };
 
+  const useSpecialCard = (cardId) => {
+    ws.current.emit('USE_SPECIAL_CARD', { roomId, playerId, cardId });
+    setShowSpecialCardMenu(false);
+  };
+
   const playAgain = () => {
+    if (playerData.tokens < currentBet) {
+      showNotification('❌ Not enough tokens for rematch!');
+      return;
+    }
     ws.current.emit('PLAY_AGAIN', { roomId, playerId });
   };
 
@@ -110,17 +202,23 @@ const App = () => {
     if (roomId && ws.current) {
       ws.current.emit('LEAVE_ROOM', { roomId });
     }
+    
+    // Return bet if game hasn't started or is not over
+    if (gameState && !gameState.gameStarted) {
+      setPlayerData(prev => ({ ...prev, tokens: prev.tokens + currentBet }));
+    }
+    
     setScreen('home');
     setRoomId('');
     setInputRoomId('');
     setPlayerId(null);
     setGameState(null);
+    setCurrentBet(0);
     setError('');
-    setShowShuffleNotice(false);
+    setShowSpecialCardMenu(false);
   };
 
   const restartGame = () => {
-    // This is for full game restart (disconnects, etc.)
     leaveRoom();
   };
 
@@ -130,10 +228,48 @@ const App = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const Card = ({ card, hidden }) => (
-    <div className={hidden ? 'card card-hidden' : 'card card-visible'}>
+  // Handle game over rewards
+  useEffect(() => {
+    if (gameState && gameState.gameOver && gameState.rewardsProcessed !== playerId) {
+      const winner = gameState.winner;
+      let winnings = 0;
+      
+      if (winner === playerId) {
+        winnings = currentBet * 2;
+        setPlayerData(prev => ({
+          ...prev,
+          tokens: prev.tokens + winnings,
+          wins: prev.wins + 1,
+          gamesPlayed: prev.gamesPlayed + 1
+        }));
+        showNotification(`🎉 You Win! +${winnings} Tokens`);
+      } else if (winner === 'draw') {
+        winnings = currentBet;
+        setPlayerData(prev => ({
+          ...prev,
+          tokens: prev.tokens + winnings,
+          gamesPlayed: prev.gamesPlayed + 1
+        }));
+        showNotification(`🤝 Draw! ${winnings} Tokens Returned`);
+      } else {
+        setPlayerData(prev => ({
+          ...prev,
+          losses: prev.losses + 1,
+          gamesPlayed: prev.gamesPlayed + 1
+        }));
+        showNotification('😢 You Lose!');
+      }
+      
+      // Mark rewards as processed for this player
+      setGameState(prev => ({ ...prev, rewardsProcessed: playerId }));
+    }
+  }, [gameState?.gameOver]);
+
+  const Card = ({ card, hidden, glowing }) => (
+    <div className={`card ${hidden ? 'card-hidden' : 'card-visible'} ${glowing ? 'card-glow' : ''}`}>
       {hidden ? (
         <div className="card-back-content">
+          <div className="card-back-pattern"></div>
           <div className="card-back-symbol">🂠</div>
         </div>
       ) : (
@@ -149,29 +285,75 @@ const App = () => {
     </div>
   );
 
+  const SpecialCard = ({ special, onClick }) => {
+    const usedCard = gameState?.players[playerId]?.specialCards?.find(sc => sc.id === special.id);
+    const isUsed = usedCard?.used || false;
+    
+    return (
+      <button
+        onClick={() => onClick(special.id)}
+        disabled={isUsed}
+        className={`special-card special-card-${special.color} ${isUsed ? 'special-card-used' : ''}`}
+      >
+        <div className="special-card-icon">{special.icon}</div>
+        <div className="special-card-name">{special.name}</div>
+        <div className="special-card-desc">{special.description}</div>
+        {isUsed && <div className="special-card-used-badge">USED</div>}
+      </button>
+    );
+  };
+
   if (screen === 'home') {
     return (
-      <div className="screen-container">
+      <div className="screen-container home-screen">
+        <div className="stars"></div>
         <div className="home-content">
-          <div className="header">
-            <h1 className="title">♠ Blackjack ♥</h1>
-            <p className="subtitle">2 Player Card Game</p>
-          </div>
-          
+          <div className="crown-icon">👑</div>
+          <h1 className="main-title">BLACKJACK REALMS</h1>
+          <p className="main-subtitle">Special Card Edition</p>
+
+          {notification && <div className="notification">{notification}</div>}
           {error && <div className="error-message">{error}</div>}
-          
+
+          <div className="player-stats-grid">
+            <div className="stat-box">
+              <div className="stat-icon">🪙</div>
+              <div className="stat-label">Tokens</div>
+              <div className="stat-value stat-value-gold">{playerData.tokens}</div>
+            </div>
+            <div className="stat-box">
+              <div className="stat-icon">🏆</div>
+              <div className="stat-label">Rank</div>
+              <div className="stat-value stat-value-blue">{playerData.rank}</div>
+            </div>
+            <div className="stat-box">
+              <div className="stat-icon">⭐</div>
+              <div className="stat-label">Level</div>
+              <div className="stat-value stat-value-purple">{playerData.level}</div>
+            </div>
+          </div>
+
           <div className="menu-box">
-            <button onClick={createRoom} className="btn btn-create">
-              <svg className="btn-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Create Room
-            </button>
-            
+            <h2 className="menu-title">Select Your Bet</h2>
+            <div className="bet-buttons">
+              <button onClick={() => createRoom(5)} className="bet-btn bet-low">
+                <span className="bet-icon">🪙</span>
+                <span className="bet-text">5 Tokens</span>
+              </button>
+              <button onClick={() => createRoom(10)} className="bet-btn bet-medium">
+                <span className="bet-icon">🪙</span>
+                <span className="bet-text">10 Tokens</span>
+              </button>
+              <button onClick={() => createRoom(20)} className="bet-btn bet-high">
+                <span className="bet-icon">🪙</span>
+                <span className="bet-text">20 Tokens</span>
+              </button>
+            </div>
+
             <div className="divider">
               <span className="divider-text">OR</span>
             </div>
-            
+
             <div className="join-section">
               <input
                 type="text"
@@ -181,11 +363,13 @@ const App = () => {
                 className="room-input"
               />
               <button onClick={joinRoom} className="btn btn-join">
-                <svg className="btn-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
                 Join Room
               </button>
+            </div>
+
+            <div className="player-record">
+              <div>Games: {playerData.gamesPlayed} | W: {playerData.wins} | L: {playerData.losses}</div>
+              <div>Daily Streak: {playerData.dailyStreak} days 🔥</div>
             </div>
           </div>
         </div>
@@ -195,18 +379,16 @@ const App = () => {
 
   if (screen === 'waiting') {
     return (
-      <div className="screen-container">
+      <div className="screen-container waiting-screen">
+        <div className="stars"></div>
         <div className="waiting-content">
           <div className="waiting-icon-wrapper">
-            <div className="waiting-icon">
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            </div>
+            <div className="waiting-icon">⏳</div>
           </div>
           
           <h2 className="waiting-title">Waiting for Opponent</h2>
           <p className="waiting-subtitle">Share this room ID with your friend</p>
+          <p className="waiting-bet">Bet: {currentBet} Tokens</p>
           
           <div className="room-id-box">
             <div className="room-id">{roomId}</div>
@@ -214,14 +396,7 @@ const App = () => {
           
           <div className="waiting-buttons">
             <button onClick={copyRoomId} className="btn btn-copy">
-              <svg className="btn-icon-small" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {copied ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                )}
-              </svg>
-              {copied ? 'Copied!' : 'Copy Room ID'}
+              {copied ? '✓ Copied!' : '📋 Copy Room ID'}
             </button>
             
             <button onClick={leaveRoom} className="btn btn-leave-small">
@@ -244,43 +419,50 @@ const App = () => {
     const opponentStopped = gameState.players[opponentId]?.stopped || false;
     const myWantsRematch = gameState.players[playerId]?.wantsRematch || false;
     const opponentWantsRematch = gameState.players[opponentId]?.wantsRematch || false;
+    const mySpecialCards = gameState.players[playerId]?.specialCards || [];
+    const unusedSpecialCards = mySpecialCards.filter(sc => !sc.used).length;
     
-    // Get win counts
     const myWins = gameState.scores?.[playerId] || 0;
     const opponentWins = gameState.scores?.[opponentId] || 0;
     
-    // Check if busted
     const myBusted = myScore > 21;
     const opponentBusted = opponentScore > 21;
     
-    // Player can act if it's their turn, they haven't stopped, and game is not over
     const canAct = isMyTurn && !myStopped && !gameState.gameOver;
 
     return (
-      <div className="screen-container">
+      <div className="screen-container game-screen">
+        <div className="stars"></div>
         <div className="game-content">
           <div className="game-header">
-            <h1 className="game-title">♠ Blackjack ♥</h1>
-            <div className="game-info">
-              <div className="room-code">Room: {roomId}</div>
-              <div className="score-tracker">{myWins} - {opponentWins}</div>
-              <div className="deck-info">Deck: {gameState.cardsRemaining || 0}</div>
+            <div className="game-info-bar">
+              <div className="game-info-item">
+                <span className="info-label">Room:</span>
+                <span className="info-value">{roomId}</span>
+              </div>
+              <div className="game-info-item">
+                <span className="info-label">Bet:</span>
+                <span className="info-value gold">{currentBet} 🪙</span>
+              </div>
+              <div className="game-info-item">
+                <span className="info-label">Score:</span>
+                <span className="info-value">{myWins} - {opponentWins}</span>
+              </div>
+              <div className="game-info-item">
+                <span className="info-label">Deck:</span>
+                <span className="info-value">{gameState.cardsRemaining || 0}</span>
+              </div>
             </div>
           </div>
 
+          {notification && <div className="notification">{notification}</div>}
           {error && <div className="error-message">{error}</div>}
-          {showShuffleNotice && (
-            <div className="shuffle-notice">
-              🔀 Deck Shuffled! Cards reset to full deck.
-            </div>
-          )}
 
+          {/* Opponent Section */}
           <div className="player-section opponent-section">
             <div className="player-header">
               <div className="player-name">
-                <svg className="player-icon" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                </svg>
+                <span className="player-icon">👤</span>
                 Opponent
                 {gameState.gameOver && opponentWantsRematch && (
                   <span className="rematch-indicator">✓ Ready</span>
@@ -295,11 +477,16 @@ const App = () => {
             </div>
             <div className="cards-container">
               {opponentCards.map((card, idx) => (
-                <Card key={idx} card={card} hidden={idx === 0 && !gameState.gameOver} />
+                <Card 
+                  key={idx} 
+                  card={card} 
+                  hidden={idx === 0 && !gameState.gameOver && !gameState.revealedOpponentCard} 
+                />
               ))}
             </div>
           </div>
 
+          {/* Status Section */}
           <div className="status-box">
             {gameState.gameOver ? (
               <div className="game-over">
@@ -333,7 +520,7 @@ const App = () => {
                     className={myWantsRematch ? "btn btn-play-again btn-disabled" : "btn btn-play-again"}
                     disabled={myWantsRematch}
                   >
-                    {myWantsRematch ? '✓ Ready to Play' : 'Play Again'}
+                    {myWantsRematch ? '✓ Ready to Play' : `Play Again (${currentBet} 🪙)`}
                   </button>
                   <button onClick={leaveRoom} className="btn btn-leave">
                     Leave Room
@@ -355,16 +542,25 @@ const App = () => {
                     {isMyTurn ? '🎯 Your Turn' : '⏳ Opponent\'s Turn'}
                   </div>
                 )}
+                
+                {gameState.revealedNextCard && (
+                  <div className="special-info">👁️ Next Card: {gameState.revealedNextCard.value}{gameState.revealedNextCard.suit}</div>
+                )}
+                {gameState.revealedOpponentCard && (
+                  <div className="special-info">🔮 Opponent's Hidden: {gameState.revealedOpponentCard.value}{gameState.revealedOpponentCard.suit}</div>
+                )}
+                {gameState.deckStats && (
+                  <div className="special-info deck-stats">📊 Deck Stats: {Object.entries(gameState.deckStats).map(([k, v]) => `${k}:${v}`).join(', ')}</div>
+                )}
               </div>
             )}
           </div>
 
+          {/* Player Section */}
           <div className="player-section my-section">
             <div className="player-header">
               <div className="player-name">
-                <svg className="player-icon" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                </svg>
+                <span className="player-icon">👤</span>
                 You
                 {gameState.gameOver && myWantsRematch && (
                   <span className="rematch-indicator">✓ Ready</span>
@@ -377,25 +573,41 @@ const App = () => {
             </div>
             <div className="cards-container">
               {myCards.map((card, idx) => (
-                <Card key={idx} card={card} hidden={false} />
+                <Card key={idx} card={card} hidden={false} glowing={true} />
               ))}
             </div>
 
             {canAct && (
               <div className="action-buttons">
                 <button onClick={hit} className="btn btn-hit">
-                  <svg className="btn-icon-small" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Hit (Draw Card)
+                  ➕ Hit (Draw Card)
                 </button>
                 <button onClick={stand} className="btn btn-stand">
-                  <svg className="btn-icon-small" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                  </svg>
-                  Stand (Stop)
+                  ⏹️ Stand (Stop)
                 </button>
+              </div>
+            )}
+
+            {mySpecialCards.length > 0 && !gameState.gameOver && (
+              <div className="special-cards-section">
+                <button 
+                  onClick={() => setShowSpecialCardMenu(!showSpecialCardMenu)}
+                  className="btn btn-special-toggle"
+                  disabled={unusedSpecialCards === 0}
+                >
+                  ✨ Special Cards ({unusedSpecialCards}/{mySpecialCards.length})
+                </button>
+                
+                {showSpecialCardMenu && (
+                  <div className="special-cards-grid">
+                    {mySpecialCards.map(sc => {
+                      const cardType = specialCardTypes.find(t => t.id === sc.id);
+                      return cardType ? (
+                        <SpecialCard key={sc.id} special={cardType} onClick={useSpecialCard} />
+                      ) : null;
+                    })}
+                  </div>
+                )}
               </div>
             )}
             
