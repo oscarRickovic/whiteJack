@@ -134,7 +134,7 @@ const startNewRound = (room) => {
   let deckShuffled = false;
   if (room.deck.length < 10) {
     room.deck = shuffleDeck(createDeck());
-    //deckShuffled = true;
+    deckShuffled = true;
   }
   
   // Draw 4 cards for the new round
@@ -151,13 +151,15 @@ const startNewRound = (room) => {
         cards: player1Cards,
         stopped: false,
         score: calculateScore(player1Cards),
-        wantsRematch: false
+        wantsRematch: false,
+        specialCardsRemaining: 3
       },
       player2: {
         cards: player2Cards,
         stopped: false,
         score: calculateScore(player2Cards),
-        wantsRematch: false
+        wantsRematch: false,
+        specialCardsRemaining: 3
       }
     },
     currentTurn: firstPlayer,
@@ -195,7 +197,8 @@ io.on('connection', (socket) => {
             cards: [],
             stopped: false,
             score: 0,
-            wantsRematch: false
+            wantsRematch: false,
+            specialCardsRemaining: 3
           },
           player2: null
         },
@@ -284,7 +287,7 @@ io.on('connection', (socket) => {
     // Check if deck is empty
     if (room.deck.length === 0) {
       room.deck = shuffleDeck(createDeck());
-      //room.gameState.deckShuffled = true;
+      room.gameState.deckShuffled = true;
     }
     
     const newCard = room.deck.pop();
@@ -357,6 +360,88 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
     
     console.log(`${playerId} stood in room ${roomId}`);
+  });
+
+  // Use Special Card
+  socket.on('USE_SPECIAL_CARD', ({ roomId, playerId, cardType, data }) => {
+    const room = rooms.get(roomId);
+    
+    if (!room || !room.gameState.gameStarted || room.gameState.gameOver) {
+      socket.emit('ERROR', { message: 'Cannot use special card now' });
+      return;
+    }
+    
+    // Check if it's the player's turn
+    if (room.gameState.currentTurn !== playerId) {
+      socket.emit('ERROR', { message: 'Not your turn!' });
+      return;
+    }
+    
+    // Check if player has stopped
+    if (room.gameState.players[playerId].stopped) {
+      socket.emit('ERROR', { message: 'You already stood' });
+      return;
+    }
+    
+    // Check if player has special cards remaining
+    if (room.gameState.players[playerId].specialCardsRemaining <= 0) {
+      socket.emit('ERROR', { message: 'No special cards remaining!' });
+      return;
+    }
+    
+    const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
+    
+    // Handle different card types
+    if (cardType === 'swap') {
+      const { myCardIndex, opponentCardIndex } = data;
+      
+      // Validate indices
+      if (
+        myCardIndex === undefined || 
+        opponentCardIndex === undefined ||
+        myCardIndex < 0 || 
+        myCardIndex >= room.gameState.players[playerId].cards.length ||
+        opponentCardIndex < 0 || 
+        opponentCardIndex >= room.gameState.players[otherPlayer].cards.length
+      ) {
+        socket.emit('ERROR', { message: 'Invalid card selection' });
+        return;
+      }
+      
+      // Perform the swap
+      const temp = room.gameState.players[playerId].cards[myCardIndex];
+      room.gameState.players[playerId].cards[myCardIndex] = room.gameState.players[otherPlayer].cards[opponentCardIndex];
+      room.gameState.players[otherPlayer].cards[opponentCardIndex] = temp;
+      
+      // Recalculate scores
+      room.gameState.players[playerId].score = calculateScore(room.gameState.players[playerId].cards);
+      room.gameState.players[otherPlayer].score = calculateScore(room.gameState.players[otherPlayer].cards);
+      
+      // Decrease special cards count
+      room.gameState.players[playerId].specialCardsRemaining--;
+      
+      console.log(`${playerId} used SWAP card in room ${roomId}`);
+      
+      // Check if player busted after swap
+      const busted = room.gameState.players[playerId].score > 21;
+      if (busted) {
+        room.gameState.players[playerId].stopped = true;
+      }
+      
+      // Check if game should end
+      const gameEnded = checkGameEnd(room);
+      
+      if (!gameEnded && !busted) {
+        // Switch turn to other player
+        if (!room.gameState.players[otherPlayer].stopped) {
+          room.gameState.currentTurn = otherPlayer;
+        }
+      }
+      
+      // Broadcast to both players
+      io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
+    }
+    // Add other special card types here in the future
   });
 
   // Play Again (New Round) - Modified to require both players

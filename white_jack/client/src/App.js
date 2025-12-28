@@ -12,6 +12,10 @@ const App = () => {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [showShuffleNotice, setShowShuffleNotice] = useState(false);
+  const [showSpecialCards, setShowSpecialCards] = useState(false);
+  const [swapMode, setSwapMode] = useState(false);
+  const [selectedMyCard, setSelectedMyCard] = useState(null);
+  const [selectedOpponentCard, setSelectedOpponentCard] = useState(null);
   const ws = useRef(null);
 
   useEffect(() => {
@@ -52,6 +56,11 @@ const App = () => {
         setTimeout(() => setShowShuffleNotice(false), 3000);
       }
       setGameState(gameState);
+      // Reset special cards UI
+      setShowSpecialCards(false);
+      setSwapMode(false);
+      setSelectedMyCard(null);
+      setSelectedOpponentCard(null);
     });
 
     ws.current.on('REMATCH_STATUS', ({ gameState }) => {
@@ -113,6 +122,10 @@ const App = () => {
     setGameState(null);
     setError('');
     setShowShuffleNotice(false);
+    setShowSpecialCards(false);
+    setSwapMode(false);
+    setSelectedMyCard(null);
+    setSelectedOpponentCard(null);
   };
 
   const restartGame = () => {
@@ -125,10 +138,56 @@ const App = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const Card = ({ card, hidden }) => (
-    <div className={`relative w-20 h-28 rounded-xl shadow-2xl transition-all duration-300 hover:-translate-y-1 hover:scale-105 hover:shadow-3xl animate-[fadeIn_0.3s_ease-out] ${
-      hidden ? 'bg-gradient-to-br from-blue-600 to-purple-700' : 'bg-white'
-    }`}>
+  const toggleSpecialCards = () => {
+    setShowSpecialCards(!showSpecialCards);
+    if (showSpecialCards) {
+      // Closing the menu, reset swap mode
+      setSwapMode(false);
+      setSelectedMyCard(null);
+      setSelectedOpponentCard(null);
+    }
+  };
+
+  const handleSwapCard = () => {
+    setSwapMode(true);
+    setSelectedMyCard(null);
+    setSelectedOpponentCard(null);
+  };
+
+  const confirmSwap = () => {
+    if (selectedMyCard !== null && selectedOpponentCard !== null) {
+      ws.current.emit('USE_SPECIAL_CARD', {
+        roomId,
+        playerId,
+        cardType: 'swap',
+        data: {
+          myCardIndex: selectedMyCard,
+          opponentCardIndex: selectedOpponentCard
+        }
+      });
+      // Reset swap mode
+      setSwapMode(false);
+      setSelectedMyCard(null);
+      setSelectedOpponentCard(null);
+      setShowSpecialCards(false);
+    }
+  };
+
+  const cancelSwap = () => {
+    setSwapMode(false);
+    setSelectedMyCard(null);
+    setSelectedOpponentCard(null);
+  };
+
+  const Card = ({ card, hidden, clickable, selected, onClick }) => (
+    <div 
+      className={`relative w-20 h-28 rounded-xl shadow-2xl transition-all duration-300 animate-[fadeIn_0.3s_ease-out] ${
+        hidden ? 'bg-gradient-to-br from-blue-600 to-purple-700' : 'bg-white'
+      } ${clickable ? 'cursor-pointer hover:-translate-y-2 hover:scale-110' : ''} ${
+        selected ? 'ring-4 ring-yellow-400 -translate-y-2 scale-110' : 'hover:-translate-y-1 hover:scale-105'
+      } hover:shadow-3xl`}
+      onClick={clickable ? onClick : undefined}
+    >
       {hidden ? (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-4xl text-white opacity-30">🂠</div>
@@ -141,6 +200,11 @@ const App = () => {
           <div className={`text-2xl ${['♥', '♦'].includes(card.suit) ? 'text-red-600' : 'text-gray-800'}`}>
             {card.suit}
           </div>
+        </div>
+      )}
+      {clickable && (
+        <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center text-xs font-bold">
+          ✓
         </div>
       )}
     </div>
@@ -263,6 +327,8 @@ const App = () => {
     const myBusted = myScore > 21;
     const opponentBusted = opponentScore > 21;
     const canAct = isMyTurn && !myStopped && !gameState.gameOver;
+    const specialCardsRemaining = gameState.players[playerId]?.specialCardsRemaining || 0;
+    const canUseSpecialCard = canAct && specialCardsRemaining > 0;
 
     return (
       <div className="w-screen h-screen overflow-hidden bg-gradient-to-br from-green-900 via-green-700 to-emerald-600 flex items-center justify-center p-5 animate-[fadeIn_0.5s_ease-out]">
@@ -277,6 +343,9 @@ const App = () => {
               <div className="font-mono text-green-200 bg-white/10 px-4 py-2 rounded-lg">
                 Deck: {gameState.cardsRemaining || 0}
               </div>
+              <div className="font-mono text-purple-200 bg-purple-500/20 px-4 py-2 rounded-lg border-2 border-purple-400/40">
+                ⭐ Special: {specialCardsRemaining}
+              </div>
             </div>
           </div>
 
@@ -289,6 +358,31 @@ const App = () => {
           {showShuffleNotice && (
             <div className="bg-gradient-to-br from-yellow-400 to-yellow-500 text-white px-6 py-4 rounded-xl mb-5 text-center font-semibold text-lg shadow-lg animate-[fadeIn_0.3s_ease-out]">
               🔀 Deck Shuffled! Cards reset to full deck.
+            </div>
+          )}
+
+          {swapMode && (
+            <div className="bg-gradient-to-br from-purple-500 to-pink-500 text-white px-6 py-4 rounded-xl mb-5 text-center font-semibold text-lg shadow-lg">
+              🔄 Swap Mode: Select one of your cards, then one opponent card
+              <div className="flex gap-3 justify-center mt-3">
+                <button
+                  onClick={confirmSwap}
+                  disabled={selectedMyCard === null || selectedOpponentCard === null}
+                  className={`px-6 py-2 rounded-lg font-bold ${
+                    selectedMyCard !== null && selectedOpponentCard !== null
+                      ? 'bg-green-600 hover:bg-green-700 cursor-pointer'
+                      : 'bg-gray-400 cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  ✓ Confirm Swap
+                </button>
+                <button
+                  onClick={cancelSwap}
+                  className="px-6 py-2 rounded-lg font-bold bg-red-600 hover:bg-red-700"
+                >
+                  ✗ Cancel
+                </button>
+              </div>
             </div>
           )}
 
@@ -312,7 +406,14 @@ const App = () => {
             </div>
             <div className="flex gap-4 justify-center flex-wrap">
               {opponentCards.map((card, idx) => (
-                <Card key={idx} card={card} hidden={idx === 0 && !gameState.gameOver} />
+                <Card 
+                  key={idx} 
+                  card={card} 
+                  hidden={idx === 0 && !gameState.gameOver}
+                  clickable={swapMode && !(idx === 0 && !gameState.gameOver)}
+                  selected={selectedOpponentCard === idx}
+                  onClick={() => swapMode && !(idx === 0 && !gameState.gameOver) && setSelectedOpponentCard(idx)}
+                />
               ))}
             </div>
           </div>
@@ -397,7 +498,14 @@ const App = () => {
             </div>
             <div className="flex gap-4 justify-center flex-wrap">
               {myCards.map((card, idx) => (
-                <Card key={idx} card={card} hidden={false} />
+                <Card 
+                  key={idx} 
+                  card={card} 
+                  hidden={false}
+                  clickable={swapMode}
+                  selected={selectedMyCard === idx}
+                  onClick={() => swapMode && setSelectedMyCard(idx)}
+                />
               ))}
             </div>
 
@@ -421,6 +529,85 @@ const App = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
                   </svg>
                   Stand (Stop)
+                </button>
+                <button 
+                  onClick={toggleSpecialCards}
+                  disabled={!canUseSpecialCard}
+                  className={`flex-1 min-w-[180px] max-w-[250px] py-4.5 px-6 border-none rounded-2xl text-lg font-semibold cursor-pointer flex items-center justify-center gap-3 text-white ${
+                    canUseSpecialCard 
+                      ? 'bg-gradient-to-br from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 hover:scale-105 active:scale-98' 
+                      : 'bg-gray-400 opacity-50 cursor-not-allowed'
+                  } transition-all duration-300`}
+                >
+                  <span className="text-xl">⭐</span>
+                  Special Cards ({specialCardsRemaining})
+                </button>
+              </div>
+            )}
+
+            {showSpecialCards && canUseSpecialCard && (
+              <div className="mt-6 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl p-6 text-white shadow-2xl">
+                <h3 className="text-2xl font-bold mb-4 text-center">✨ Special Cards</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    onClick={handleSwapCard}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                  >
+                    <div className="text-2xl mb-2">🔄</div>
+                    <div className="font-bold text-lg mb-1">The Swap</div>
+                    <div className="text-sm opacity-90">Trade one of your cards with opponent's card</div>
+                  </button>
+                  
+                  <button
+                    disabled
+                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                  >
+                    <div className="text-2xl mb-2">👁️</div>
+                    <div className="font-bold text-lg mb-1">The Peek (Coming Soon)</div>
+                    <div className="text-sm opacity-90">Reveal the next card in the deck</div>
+                  </button>
+                  
+                  <button
+                    disabled
+                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                  >
+                    <div className="text-2xl mb-2">🔮</div>
+                    <div className="font-bold text-lg mb-1">The Oracle (Coming Soon)</div>
+                    <div className="text-sm opacity-90">See opponent's hidden card</div>
+                  </button>
+                  
+                  <button
+                    disabled
+                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                  >
+                    <div className="text-2xl mb-2">📊</div>
+                    <div className="font-bold text-lg mb-1">The Statistic (Coming Soon)</div>
+                    <div className="text-sm opacity-90">View remaining deck statistics</div>
+                  </button>
+                  
+                  <button
+                    disabled
+                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                  >
+                    <div className="text-2xl mb-2">⚡</div>
+                    <div className="font-bold text-lg mb-1">The Glitch (Coming Soon)</div>
+                    <div className="text-sm opacity-90">Randomly change opponent's card value</div>
+                  </button>
+                  
+                  <button
+                    disabled
+                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                  >
+                    <div className="text-2xl mb-2">🚀</div>
+                    <div className="font-bold text-lg mb-1">ToTheMoon (Coming Soon)</div>
+                    <div className="text-sm opacity-90">Change any of your card values</div>
+                  </button>
+                </div>
+                <button
+                  onClick={toggleSpecialCards}
+                  className="w-full mt-4 py-3 bg-red-500 hover:bg-red-600 rounded-xl font-bold transition-all"
+                >
+                  Close Special Cards
                 </button>
               </div>
             )}
