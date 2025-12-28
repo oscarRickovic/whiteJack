@@ -20,6 +20,11 @@ const App = () => {
   const [selectedOpponentCard, setSelectedOpponentCard] = useState(null);
   const [selectedValue, setSelectedValue] = useState(null);
   const [specialCardResult, setSpecialCardResult] = useState(null);
+  const [swapAnimation, setSwapAnimation] = useState(false);
+  const [glitchAnimation, setGlitchAnimation] = useState(false);
+  const [rocketAnimation, setRocketAnimation] = useState(false);
+  const [peekAnimation, setPeekAnimation] = useState(false);
+  const [oracleAnimation, setOracleAnimation] = useState(false);
   const ws = useRef(null);
 
   useEffect(() => {
@@ -69,12 +74,16 @@ const App = () => {
 
     ws.current.on('SPECIAL_CARD_RESULT', ({ cardType, data }) => {
       if (cardType === 'peek') {
+        setPeekAnimation(true);
+        setTimeout(() => setPeekAnimation(false), 2000);
         setSpecialCardResult({
           type: 'peek',
           message: `Next card in deck: ${data.nextCard.value}${data.nextCard.suit}`,
           card: data.nextCard
         });
       } else if (cardType === 'oracle') {
+        setOracleAnimation(true);
+        setTimeout(() => setOracleAnimation(false), 2000);
         setSpecialCardResult({
           type: 'oracle',
           message: `Opponent's hidden card: ${data.hiddenCard.value}${data.hiddenCard.suit}`,
@@ -126,6 +135,11 @@ const App = () => {
     setSelectedOpponentCard(null);
     setSelectedValue(null);
     setSpecialCardResult(null);
+    setSwapAnimation(false);
+    setGlitchAnimation(false);
+    setRocketAnimation(false);
+    setPeekAnimation(false);
+    setOracleAnimation(false);
   };
 
   const createRoom = () => {
@@ -240,53 +254,65 @@ const App = () => {
 
   const confirmSwap = () => {
     if (selectedMyCard !== null && selectedOpponentCard !== null) {
-      ws.current.emit('USE_SPECIAL_CARD', {
-        roomId,
-        playerId,
-        cardType: 'swap',
-        data: {
-          myCardIndex: selectedMyCard,
-          opponentCardIndex: selectedOpponentCard
-        }
-      });
-      setSwapMode(false);
-      setSelectedMyCard(null);
-      setSelectedOpponentCard(null);
-      setShowSpecialCards(false);
+      setSwapAnimation(true);
+      setTimeout(() => {
+        ws.current.emit('USE_SPECIAL_CARD', {
+          roomId,
+          playerId,
+          cardType: 'swap',
+          data: {
+            myCardIndex: selectedMyCard,
+            opponentCardIndex: selectedOpponentCard
+          }
+        });
+        setSwapMode(false);
+        setSelectedMyCard(null);
+        setSelectedOpponentCard(null);
+        setShowSpecialCards(false);
+        setTimeout(() => setSwapAnimation(false), 1500);
+      }, 500);
     }
   };
 
   const confirmGlitch = () => {
     if (selectedOpponentCard !== null) {
-      ws.current.emit('USE_SPECIAL_CARD', {
-        roomId,
-        playerId,
-        cardType: 'glitch',
-        data: {
-          targetCardIndex: selectedOpponentCard
-        }
-      });
-      setGlitchMode(false);
-      setSelectedOpponentCard(null);
-      setShowSpecialCards(false);
+      setGlitchAnimation(true);
+      setTimeout(() => {
+        ws.current.emit('USE_SPECIAL_CARD', {
+          roomId,
+          playerId,
+          cardType: 'glitch',
+          data: {
+            targetCardIndex: selectedOpponentCard
+          }
+        });
+        setGlitchMode(false);
+        setSelectedOpponentCard(null);
+        setShowSpecialCards(false);
+        setTimeout(() => setGlitchAnimation(false), 1500);
+      }, 500);
     }
   };
 
   const confirmToTheMoon = () => {
     if (selectedMyCard !== null && selectedValue !== null) {
-      ws.current.emit('USE_SPECIAL_CARD', {
-        roomId,
-        playerId,
-        cardType: 'tothemoon',
-        data: {
-          myCardIndex: selectedMyCard,
-          newValue: selectedValue
-        }
-      });
-      setToTheMoonMode(false);
-      setSelectedMyCard(null);
-      setSelectedValue(null);
-      setShowSpecialCards(false);
+      setRocketAnimation(true);
+      setTimeout(() => {
+        ws.current.emit('USE_SPECIAL_CARD', {
+          roomId,
+          playerId,
+          cardType: 'tothemoon',
+          data: {
+            myCardIndex: selectedMyCard,
+            newValue: selectedValue
+          }
+        });
+        setToTheMoonMode(false);
+        setSelectedMyCard(null);
+        setSelectedValue(null);
+        setShowSpecialCards(false);
+        setTimeout(() => setRocketAnimation(false), 1500);
+      }, 500);
     }
   };
 
@@ -452,6 +478,99 @@ const App = () => {
 
     return (
       <div className="w-screen h-screen overflow-hidden bg-gradient-to-br from-green-900 via-green-700 to-emerald-600 flex items-center justify-center p-5 animate-[fadeIn_0.5s_ease-out]">
+        <style>{`
+          @keyframes swapBounce {
+            0%, 100% { transform: translateX(0) rotate(0deg); }
+            25% { transform: translateX(-20px) rotate(-15deg); }
+            75% { transform: translateX(20px) rotate(15deg); }
+          }
+          @keyframes glitchShake {
+            0%, 100% { transform: translate(0, 0); }
+            10% { transform: translate(-5px, 5px); }
+            20% { transform: translate(5px, -5px); }
+            30% { transform: translate(-5px, -5px); }
+            40% { transform: translate(5px, 5px); }
+            50% { transform: translate(-5px, 0); }
+            60% { transform: translate(5px, 0); }
+            70% { transform: translate(0, -5px); }
+            80% { transform: translate(0, 5px); }
+            90% { transform: translate(-5px, 5px); }
+          }
+          @keyframes rocketLaunch {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            50% { transform: translateY(-100px) scale(1.5) rotate(10deg); opacity: 0.8; }
+            100% { transform: translateY(-200px) scale(0.5) rotate(0deg); opacity: 0; }
+          }
+          @keyframes peekPulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+          }
+          @keyframes oracleGlow {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.5) hue-rotate(90deg); }
+          }
+        `}</style>
+
+        {/* Swap Animation Overlay */}
+        {swapAnimation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
+            <div className="text-9xl animate-[swapBounce_1s_ease-in-out]">
+              🔄
+            </div>
+            <div className="absolute text-4xl font-bold text-white mt-32 animate-pulse">
+              SWAP!
+            </div>
+          </div>
+        )}
+
+        {/* Glitch Animation Overlay */}
+        {glitchAnimation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
+            <div className="text-9xl animate-[glitchShake_0.5s_ease-in-out_3]">
+              ⚡
+            </div>
+            <div className="absolute text-4xl font-bold text-yellow-300 mt-32 animate-[glitchShake_0.3s_ease-in-out_infinite]">
+              GLITCH!
+            </div>
+          </div>
+        )}
+
+        {/* Rocket Animation Overlay */}
+        {rocketAnimation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
+            <div className="text-9xl animate-[rocketLaunch_1.5s_ease-out]">
+              🚀
+            </div>
+            <div className="absolute text-4xl font-bold text-blue-300 mt-32 animate-pulse">
+              TO THE MOON!
+            </div>
+          </div>
+        )}
+
+        {/* Peek Animation Overlay */}
+        {peekAnimation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
+            <div className="text-9xl animate-[peekPulse_1s_ease-in-out_2]">
+              👁️
+            </div>
+            <div className="absolute text-4xl font-bold text-cyan-300 mt-32 animate-pulse">
+              PEEKING...
+            </div>
+          </div>
+        )}
+
+        {/* Oracle Animation Overlay */}
+        {oracleAnimation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none">
+            <div className="text-9xl animate-[oracleGlow_1s_ease-in-out_2]">
+              🔮
+            </div>
+            <div className="absolute text-4xl font-bold text-purple-300 mt-32 animate-pulse">
+              REVEALING...
+            </div>
+          </div>
+        )}
+
         <div className="w-full max-w-6xl h-screen p-4 flex flex-col overflow-y-auto overflow-x-hidden">
           <div className="text-center mb-4 shrink-0">
             <h1 className="text-5xl font-bold text-white mb-2">♠ Blackjack ♥</h1>
