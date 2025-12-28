@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
 
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
@@ -25,7 +25,27 @@ const App = () => {
   const [rocketAnimation, setRocketAnimation] = useState(false);
   const [peekAnimation, setPeekAnimation] = useState(false);
   const [oracleAnimation, setOracleAnimation] = useState(false);
+  const [showRandomSpecialCards, setShowRandomSpecialCards] = useState(false);
+  const [availableSpecialCards, setAvailableSpecialCards] = useState([]);
   const ws = useRef(null);
+
+  const determineAvailableSpecialCards = useCallback(() => {
+    const rand = Math.random();
+    
+    if (rand < 0.15) return ['swap'];              // 0.0 - 0.15 (15%)
+    if (rand < 0.30) return ['peek'];              // 0.15 - 0.30 (15%)
+    if (rand < 0.50) return ['oracle'];            // 0.30 - 0.50 (20%)
+    if (rand < 0.70) return ['statistic'];         // 0.50 - 0.70 (20%)
+    if (rand < 0.95) return ['glitch'];            // 0.70 - 0.95 (25%)
+    return ['tothemoon'];                          // 0.95 - 1.0 (5%)
+  }, []);
+
+  useEffect(() => {
+    if (gameState?.currentRound) {
+      setShowRandomSpecialCards(Math.random() > 0.9);
+      setAvailableSpecialCards(determineAvailableSpecialCards());
+    }
+  }, [gameState?.currentRound, determineAvailableSpecialCards]);
 
   useEffect(() => {
     ws.current = io(SOCKET_URL, {
@@ -49,6 +69,8 @@ const App = () => {
       setPlayerId(playerId);
       setGameState(gameState);
       setScreen('game');
+      setShowRandomSpecialCards(Math.random() > 0.9);
+      setAvailableSpecialCards(determineAvailableSpecialCards());
     });
 
     ws.current.on('GAME_UPDATE', ({ gameState }) => {
@@ -124,7 +146,7 @@ const App = () => {
         ws.current.disconnect();
       }
     };
-  }, [showShuffleNotice]);
+  }, [showShuffleNotice, determineAvailableSpecialCards]);
 
   const resetSpecialCardUI = () => {
     setShowSpecialCards(false);
@@ -140,6 +162,8 @@ const App = () => {
     setRocketAnimation(false);
     setPeekAnimation(false);
     setOracleAnimation(false);
+    setShowRandomSpecialCards(Math.random() > 0.9);
+    setAvailableSpecialCards(determineAvailableSpecialCards());
   };
 
   const createRoom = () => {
@@ -850,18 +874,21 @@ const App = () => {
                   </svg>
                   Stand (Stop)
                 </button>
-                <button 
-                  onClick={toggleSpecialCards}
-                  disabled={!canUseSpecialCard}
-                  className={`flex-1 min-w-[180px] max-w-[250px] py-4.5 px-6 border-none rounded-2xl text-lg font-semibold cursor-pointer flex items-center justify-center gap-3 text-white ${
-                    canUseSpecialCard 
-                      ? 'bg-gradient-to-br from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 hover:scale-105 active:scale-98' 
-                      : 'bg-gray-400 opacity-50 cursor-not-allowed'
-                  } transition-all duration-300`}
-                >
-                  <span className="text-xl">⭐</span>
-                  Special Cards ({specialCardsRemaining})
-                </button>
+                
+                {showRandomSpecialCards && (
+                  <button 
+                    onClick={toggleSpecialCards}
+                    disabled={!canUseSpecialCard}
+                    className={`flex-1 min-w-[180px] max-w-[250px] py-4.5 px-6 border-none rounded-2xl text-lg font-semibold cursor-pointer flex items-center justify-center gap-3 text-white ${
+                      canUseSpecialCard 
+                        ? 'bg-gradient-to-br from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 hover:scale-105 active:scale-98' 
+                        : 'bg-gray-400 opacity-50 cursor-not-allowed'
+                    } transition-all duration-300`}
+                  >
+                    <span className="text-xl">⭐</span>
+                    Special Cards ({specialCardsRemaining})
+                  </button>
+                )}
               </div>
             )}
 
@@ -869,59 +896,71 @@ const App = () => {
               <div className="mt-6 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl p-6 text-white shadow-2xl">
                 <h3 className="text-2xl font-bold mb-4 text-center">✨ Special Cards</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button
-                    onClick={handleSwapCard}
-                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
-                  >
-                    <div className="text-2xl mb-2">🔄</div>
-                    <div className="font-bold text-lg mb-1">The Swap</div>
-                    <div className="text-sm opacity-90">Trade one of your cards with opponent's card</div>
-                  </button>
+                  {availableSpecialCards.includes('swap') && (
+                    <button
+                      onClick={handleSwapCard}
+                      className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                    >
+                      <div className="text-2xl mb-2">🔄</div>
+                      <div className="font-bold text-lg mb-1">The Swap</div>
+                      <div className="text-sm opacity-90">Trade one of your cards with opponent's card</div>
+                    </button>
+                  )}
                   
-                  <button
-                    onClick={handlePeekCard}
-                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
-                  >
-                    <div className="text-2xl mb-2">👁️</div>
-                    <div className="font-bold text-lg mb-1">The Peek</div>
-                    <div className="text-sm opacity-90">Reveal the next card in the deck</div>
-                  </button>
+                  {availableSpecialCards.includes('peek') && (
+                    <button
+                      onClick={handlePeekCard}
+                      className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                    >
+                      <div className="text-2xl mb-2">👁️</div>
+                      <div className="font-bold text-lg mb-1">The Peek</div>
+                      <div className="text-sm opacity-90">Reveal the next card in the deck</div>
+                    </button>
+                  )}
                   
-                  <button
-                    onClick={handleOracleCard}
-                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
-                  >
-                    <div className="text-2xl mb-2">🔮</div>
-                    <div className="font-bold text-lg mb-1">The Oracle</div>
-                    <div className="text-sm opacity-90">See opponent's hidden card</div>
-                  </button>
+                  {availableSpecialCards.includes('oracle') && (
+                    <button
+                      onClick={handleOracleCard}
+                      className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                    >
+                      <div className="text-2xl mb-2">🔮</div>
+                      <div className="font-bold text-lg mb-1">The Oracle</div>
+                      <div className="text-sm opacity-90">See opponent's hidden card</div>
+                    </button>
+                  )}
                   
-                  <button
-                    onClick={handleStatisticCard}
-                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
-                  >
-                    <div className="text-2xl mb-2">📊</div>
-                    <div className="font-bold text-lg mb-1">The Statistic</div>
-                    <div className="text-sm opacity-90">View remaining deck statistics</div>
-                  </button>
+                  {availableSpecialCards.includes('statistic') && (
+                    <button
+                      onClick={handleStatisticCard}
+                      className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                    >
+                      <div className="text-2xl mb-2">📊</div>
+                      <div className="font-bold text-lg mb-1">The Statistic</div>
+                      <div className="text-sm opacity-90">View remaining deck statistics</div>
+                    </button>
+                  )}
                   
-                  <button
-                    onClick={handleGlitchCard}
-                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
-                  >
-                    <div className="text-2xl mb-2">⚡</div>
-                    <div className="font-bold text-lg mb-1">The Glitch</div>
-                    <div className="text-sm opacity-90">Randomly change opponent's card value</div>
-                  </button>
+                  {availableSpecialCards.includes('glitch') && (
+                    <button
+                      onClick={handleGlitchCard}
+                      className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                    >
+                      <div className="text-2xl mb-2">⚡</div>
+                      <div className="font-bold text-lg mb-1">The Glitch</div>
+                      <div className="text-sm opacity-90">Randomly change opponent's card value</div>
+                    </button>
+                  )}
                   
-                  <button
-                    onClick={handleToTheMoonCard}
-                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
-                  >
-                    <div className="text-2xl mb-2">🚀</div>
-                    <div className="font-bold text-lg mb-1">ToTheMoon</div>
-                    <div className="text-sm opacity-90">Change any of your card values</div>
-                  </button>
+                  {availableSpecialCards.includes('tothemoon') && (
+                    <button
+                      onClick={handleToTheMoonCard}
+                      className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
+                    >
+                      <div className="text-2xl mb-2">🚀</div>
+                      <div className="font-bold text-lg mb-1">ToTheMoon</div>
+                      <div className="text-sm opacity-90">Change any of your card values</div>
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={toggleSpecialCards}
