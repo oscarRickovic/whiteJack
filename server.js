@@ -83,34 +83,41 @@ const generateRoomId = () => {
   return roomId;
 };
 
+// Get deck statistics
+const getDeckStatistics = (deck) => {
+  const stats = {};
+  deck.forEach(card => {
+    const key = card.value;
+    if (!stats[key]) {
+      stats[key] = 0;
+    }
+    stats[key]++;
+  });
+  return stats;
+};
+
 // Check if game should end and calculate winner
 const checkGameEnd = (room) => {
   const p1 = room.gameState.players.player1;
   const p2 = room.gameState.players.player2;
   
-  // Check if anyone busted (over 21)
   const p1Busted = p1.score > 21;
   const p2Busted = p2.score > 21;
   
-  // Game only ends when BOTH players have stopped (either manually or by busting)
   if (p1.stopped && p2.stopped) {
     room.gameState.gameOver = true;
     
-    // If both busted, it's a draw
     if (p1Busted && p2Busted) {
       room.gameState.winner = 'draw';
     } 
-    // If only player 1 busted, player 2 wins
     else if (p1Busted) {
       room.gameState.winner = 'player2';
       room.scores.player2++;
     } 
-    // If only player 2 busted, player 1 wins
     else if (p2Busted) {
       room.gameState.winner = 'player1';
       room.scores.player1++;
     }
-    // If neither busted, compare scores
     else if (p1.score > p2.score) {
       room.gameState.winner = 'player1';
       room.scores.player1++;
@@ -130,18 +137,15 @@ const checkGameEnd = (room) => {
 
 // Start a new round in existing room
 const startNewRound = (room) => {
-  // Check if we need to shuffle (less than 10 cards left)
   let deckShuffled = false;
   if (room.deck.length < 10) {
     room.deck = shuffleDeck(createDeck());
     deckShuffled = true;
   }
   
-  // Draw 4 cards for the new round
   const player1Cards = [room.deck.pop(), room.deck.pop()];
   const player2Cards = [room.deck.pop(), room.deck.pop()];
   
-  // Alternate who goes first
   room.roundNumber++;
   const firstPlayer = room.roundNumber % 2 === 1 ? 'player1' : 'player2';
   
@@ -152,14 +156,14 @@ const startNewRound = (room) => {
         stopped: false,
         score: calculateScore(player1Cards),
         wantsRematch: false,
-        specialCardsRemaining: 3
+        specialCardsRemaining: 6
       },
       player2: {
         cards: player2Cards,
         stopped: false,
         score: calculateScore(player2Cards),
         wantsRematch: false,
-        specialCardsRemaining: 3
+        specialCardsRemaining: 6
       }
     },
     currentTurn: firstPlayer,
@@ -198,7 +202,7 @@ io.on('connection', (socket) => {
             stopped: false,
             score: 0,
             wantsRematch: false,
-            specialCardsRemaining: 3
+            specialCardsRemaining: 6
           },
           player2: null
         },
@@ -244,17 +248,14 @@ io.on('connection', (socket) => {
     room.player2 = socket.id;
     socket.join(roomId);
     
-    // Start first round
     const gameState = startNewRound(room);
     
-    // Send to player 2
     socket.emit('GAME_STARTED', { 
       roomId,
       playerId: 'player2',
       gameState 
     });
     
-    // Send to player 1
     io.to(room.player1).emit('GAME_STARTED', { 
       roomId,
       playerId: 'player1',
@@ -272,19 +273,16 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // CRITICAL: Check if it's actually this player's turn
     if (room.gameState.currentTurn !== playerId) {
       socket.emit('ERROR', { message: 'Not your turn!' });
       return;
     }
     
-    // Check if this player has already stopped
     if (room.gameState.players[playerId].stopped) {
       socket.emit('ERROR', { message: 'You already stood' });
       return;
     }
     
-    // Check if deck is empty
     if (room.deck.length === 0) {
       room.deck = shuffleDeck(createDeck());
       room.gameState.deckShuffled = true;
@@ -295,23 +293,17 @@ io.on('connection', (socket) => {
     room.gameState.players[playerId].score = calculateScore(room.gameState.players[playerId].cards);
     room.gameState.cardsRemaining = room.deck.length;
     
-    // Check if player busted (over 21)
     const busted = room.gameState.players[playerId].score > 21;
     
     if (busted) {
-      // Player busted - automatically stop them
       room.gameState.players[playerId].stopped = true;
     }
     
-    // Check if game should end (both players stopped)
     const gameEnded = checkGameEnd(room);
     
     if (!gameEnded) {
-      // Game continues - determine next turn
       const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
       
-      // If the other player has stopped, keep the turn with current player
-      // Otherwise, switch turn
       if (room.gameState.players[otherPlayer].stopped) {
         room.gameState.currentTurn = playerId;
       } else {
@@ -319,7 +311,6 @@ io.on('connection', (socket) => {
       }
     }
     
-    // Broadcast to both players
     io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
     
     console.log(`${playerId} hit in room ${roomId}. Score: ${room.gameState.players[playerId].score}${busted ? ' (BUSTED)' : ''}. Cards remaining: ${room.deck.length}`);
@@ -333,13 +324,11 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // CRITICAL: Check if it's actually this player's turn
     if (room.gameState.currentTurn !== playerId) {
       socket.emit('ERROR', { message: 'Not your turn!' });
       return;
     }
     
-    // Check if this player has already stopped
     if (room.gameState.players[playerId].stopped) {
       socket.emit('ERROR', { message: 'You already stood' });
       return;
@@ -347,16 +336,13 @@ io.on('connection', (socket) => {
     
     room.gameState.players[playerId].stopped = true;
     
-    // Check if game should end
     const gameEnded = checkGameEnd(room);
     
     if (!gameEnded) {
       const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
-      // Other player hasn't stopped yet, give them the turn
       room.gameState.currentTurn = otherPlayer;
     }
     
-    // Broadcast to both players
     io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
     
     console.log(`${playerId} stood in room ${roomId}`);
@@ -371,19 +357,16 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Check if it's the player's turn
     if (room.gameState.currentTurn !== playerId) {
       socket.emit('ERROR', { message: 'Not your turn!' });
       return;
     }
     
-    // Check if player has stopped
     if (room.gameState.players[playerId].stopped) {
       socket.emit('ERROR', { message: 'You already stood' });
       return;
     }
     
-    // Check if player has special cards remaining
     if (room.gameState.players[playerId].specialCardsRemaining <= 0) {
       socket.emit('ERROR', { message: 'No special cards remaining!' });
       return;
@@ -395,7 +378,6 @@ io.on('connection', (socket) => {
     if (cardType === 'swap') {
       const { myCardIndex, opponentCardIndex } = data;
       
-      // Validate indices
       if (
         myCardIndex === undefined || 
         opponentCardIndex === undefined ||
@@ -408,43 +390,168 @@ io.on('connection', (socket) => {
         return;
       }
       
-      // Perform the swap
       const temp = room.gameState.players[playerId].cards[myCardIndex];
       room.gameState.players[playerId].cards[myCardIndex] = room.gameState.players[otherPlayer].cards[opponentCardIndex];
       room.gameState.players[otherPlayer].cards[opponentCardIndex] = temp;
       
-      // Recalculate scores
       room.gameState.players[playerId].score = calculateScore(room.gameState.players[playerId].cards);
       room.gameState.players[otherPlayer].score = calculateScore(room.gameState.players[otherPlayer].cards);
       
-      // Decrease special cards count
       room.gameState.players[playerId].specialCardsRemaining--;
       
       console.log(`${playerId} used SWAP card in room ${roomId}`);
       
-      // Check if player busted after swap
       const busted = room.gameState.players[playerId].score > 21;
       if (busted) {
         room.gameState.players[playerId].stopped = true;
       }
       
-      // Check if game should end
       const gameEnded = checkGameEnd(room);
       
       if (!gameEnded && !busted) {
-        // Switch turn to other player
         if (!room.gameState.players[otherPlayer].stopped) {
           room.gameState.currentTurn = otherPlayer;
         }
       }
       
-      // Broadcast to both players
       io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
     }
-    // Add other special card types here in the future
+    else if (cardType === 'peek') {
+      if (room.deck.length === 0) {
+        socket.emit('ERROR', { message: 'Deck is empty!' });
+        return;
+      }
+      
+      const nextCard = room.deck[room.deck.length - 1];
+      
+      room.gameState.players[playerId].specialCardsRemaining--;
+      
+      socket.emit('SPECIAL_CARD_RESULT', {
+        cardType: 'peek',
+        data: { nextCard }
+      });
+      
+      io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
+      
+      console.log(`${playerId} used PEEK card in room ${roomId}. Next card: ${nextCard.value}${nextCard.suit}`);
+    }
+    else if (cardType === 'oracle') {
+      const opponentHiddenCard = room.gameState.players[otherPlayer].cards[0];
+      
+      room.gameState.players[playerId].specialCardsRemaining--;
+      
+      socket.emit('SPECIAL_CARD_RESULT', {
+        cardType: 'oracle',
+        data: { hiddenCard: opponentHiddenCard }
+      });
+      
+      io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
+      
+      console.log(`${playerId} used ORACLE card in room ${roomId}. Hidden card: ${opponentHiddenCard.value}${opponentHiddenCard.suit}`);
+    }
+    else if (cardType === 'statistic') {
+      const deckStats = getDeckStatistics(room.deck);
+      const totalCards = room.deck.length;
+      
+      room.gameState.players[playerId].specialCardsRemaining--;
+      
+      socket.emit('SPECIAL_CARD_RESULT', {
+        cardType: 'statistic',
+        data: { 
+          statistics: deckStats,
+          totalCards
+        }
+      });
+      
+      io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
+      
+      console.log(`${playerId} used STATISTIC card in room ${roomId}. Total cards: ${totalCards}`);
+    }
+    else if (cardType === 'glitch') {
+      const { targetCardIndex } = data;
+      
+      if (
+        targetCardIndex === undefined ||
+        targetCardIndex < 0 || 
+        targetCardIndex >= room.gameState.players[otherPlayer].cards.length
+      ) {
+        socket.emit('ERROR', { message: 'Invalid card selection' });
+        return;
+      }
+      
+      const randomValue = Math.floor(Math.random() * 11) + 1;
+      const targetCard = room.gameState.players[otherPlayer].cards[targetCardIndex];
+      const oldValue = targetCard.numValue;
+      
+      targetCard.numValue = randomValue;
+      targetCard.value = randomValue.toString();
+      
+      room.gameState.players[otherPlayer].score = calculateScore(room.gameState.players[otherPlayer].cards);
+      
+      room.gameState.players[playerId].specialCardsRemaining--;
+      
+      console.log(`${playerId} used GLITCH card in room ${roomId}. Changed card from ${oldValue} to ${randomValue}`);
+      
+      const busted = room.gameState.players[playerId].score > 21;
+      if (busted) {
+        room.gameState.players[playerId].stopped = true;
+      }
+      
+      const gameEnded = checkGameEnd(room);
+      
+      if (!gameEnded && !busted) {
+        if (!room.gameState.players[otherPlayer].stopped) {
+          room.gameState.currentTurn = otherPlayer;
+        }
+      }
+      
+      io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
+    }
+    else if (cardType === 'tothemoon') {
+      const { myCardIndex, newValue } = data;
+      
+      if (
+        myCardIndex === undefined ||
+        myCardIndex < 0 || 
+        myCardIndex >= room.gameState.players[playerId].cards.length ||
+        newValue === undefined ||
+        newValue < 1 ||
+        newValue > 11
+      ) {
+        socket.emit('ERROR', { message: 'Invalid card or value selection' });
+        return;
+      }
+      
+      const targetCard = room.gameState.players[playerId].cards[myCardIndex];
+      const oldValue = targetCard.numValue;
+      
+      targetCard.numValue = newValue;
+      targetCard.value = newValue.toString();
+      
+      room.gameState.players[playerId].score = calculateScore(room.gameState.players[playerId].cards);
+      
+      room.gameState.players[playerId].specialCardsRemaining--;
+      
+      console.log(`${playerId} used TOTHEMOON card in room ${roomId}. Changed card from ${oldValue} to ${newValue}`);
+      
+      const busted = room.gameState.players[playerId].score > 21;
+      if (busted) {
+        room.gameState.players[playerId].stopped = true;
+      }
+      
+      const gameEnded = checkGameEnd(room);
+      
+      if (!gameEnded && !busted) {
+        if (!room.gameState.players[otherPlayer].stopped) {
+          room.gameState.currentTurn = otherPlayer;
+        }
+      }
+      
+      io.to(roomId).emit('GAME_UPDATE', { gameState: room.gameState });
+    }
   });
 
-  // Play Again (New Round) - Modified to require both players
+  // Play Again (New Round)
   socket.on('PLAY_AGAIN', ({ roomId, playerId }) => {
     const room = rooms.get(roomId);
     
@@ -458,19 +565,15 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Mark this player as wanting a rematch
     room.gameState.players[playerId].wantsRematch = true;
     
     const otherPlayer = playerId === 'player1' ? 'player2' : 'player1';
     
-    // Check if both players want rematch
     if (room.gameState.players[otherPlayer].wantsRematch) {
-      // Both players ready - start new round
       const gameState = startNewRound(room);
       io.to(roomId).emit('NEW_ROUND', { gameState });
       console.log(`New round started in room ${roomId}. Round #${room.roundNumber}. Score: ${room.scores.player1}-${room.scores.player2}`);
     } else {
-      // This player is ready, waiting for other player
       io.to(roomId).emit('REMATCH_STATUS', { 
         gameState: room.gameState 
       });
@@ -483,12 +586,10 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     
     if (room) {
-      // Notify other player
       io.to(roomId).emit('PLAYER_LEFT', { 
         message: 'Other player left the room' 
       });
       
-      // Delete the room
       rooms.delete(roomId);
       console.log(`Room ${roomId} deleted - player left`);
     }
@@ -498,10 +599,8 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     
-    // Find and clean up rooms
     for (const [roomId, room] of rooms.entries()) {
       if (room.player1 === socket.id || room.player2 === socket.id) {
-        // Notify other player
         io.to(roomId).emit('PLAYER_DISCONNECTED', { 
           message: 'Other player disconnected' 
         });

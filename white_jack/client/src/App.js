@@ -14,8 +14,12 @@ const App = () => {
   const [showShuffleNotice, setShowShuffleNotice] = useState(false);
   const [showSpecialCards, setShowSpecialCards] = useState(false);
   const [swapMode, setSwapMode] = useState(false);
+  const [glitchMode, setGlitchMode] = useState(false);
+  const [toTheMoonMode, setToTheMoonMode] = useState(false);
   const [selectedMyCard, setSelectedMyCard] = useState(null);
   const [selectedOpponentCard, setSelectedOpponentCard] = useState(null);
+  const [selectedValue, setSelectedValue] = useState(null);
+  const [specialCardResult, setSpecialCardResult] = useState(null);
   const ws = useRef(null);
 
   useEffect(() => {
@@ -56,15 +60,39 @@ const App = () => {
         setTimeout(() => setShowShuffleNotice(false), 3000);
       }
       setGameState(gameState);
-      // Reset special cards UI
-      setShowSpecialCards(false);
-      setSwapMode(false);
-      setSelectedMyCard(null);
-      setSelectedOpponentCard(null);
+      resetSpecialCardUI();
     });
 
     ws.current.on('REMATCH_STATUS', ({ gameState }) => {
       setGameState(gameState);
+    });
+
+    ws.current.on('SPECIAL_CARD_RESULT', ({ cardType, data }) => {
+      if (cardType === 'peek') {
+        setSpecialCardResult({
+          type: 'peek',
+          message: `Next card in deck: ${data.nextCard.value}${data.nextCard.suit}`,
+          card: data.nextCard
+        });
+      } else if (cardType === 'oracle') {
+        setSpecialCardResult({
+          type: 'oracle',
+          message: `Opponent's hidden card: ${data.hiddenCard.value}${data.hiddenCard.suit}`,
+          card: data.hiddenCard
+        });
+      } else if (cardType === 'statistic') {
+        const statsArray = Object.entries(data.statistics)
+          .sort((a, b) => b[1] - a[1])
+          .map(([card, count]) => `${card}(${count})`)
+          .join(', ');
+        setSpecialCardResult({
+          type: 'statistic',
+          message: `Deck Statistics (${data.totalCards} cards):`,
+          stats: statsArray
+        });
+      }
+      
+      setTimeout(() => setSpecialCardResult(null), 5000);
     });
 
     ws.current.on('ERROR', ({ message }) => {
@@ -88,6 +116,17 @@ const App = () => {
       }
     };
   }, [showShuffleNotice]);
+
+  const resetSpecialCardUI = () => {
+    setShowSpecialCards(false);
+    setSwapMode(false);
+    setGlitchMode(false);
+    setToTheMoonMode(false);
+    setSelectedMyCard(null);
+    setSelectedOpponentCard(null);
+    setSelectedValue(null);
+    setSpecialCardResult(null);
+  };
 
   const createRoom = () => {
     ws.current.emit('CREATE_ROOM');
@@ -121,11 +160,7 @@ const App = () => {
     setPlayerId(null);
     setGameState(null);
     setError('');
-    setShowShuffleNotice(false);
-    setShowSpecialCards(false);
-    setSwapMode(false);
-    setSelectedMyCard(null);
-    setSelectedOpponentCard(null);
+    resetSpecialCardUI();
   };
 
   const restartGame = () => {
@@ -141,17 +176,66 @@ const App = () => {
   const toggleSpecialCards = () => {
     setShowSpecialCards(!showSpecialCards);
     if (showSpecialCards) {
-      // Closing the menu, reset swap mode
       setSwapMode(false);
+      setGlitchMode(false);
+      setToTheMoonMode(false);
       setSelectedMyCard(null);
       setSelectedOpponentCard(null);
+      setSelectedValue(null);
     }
   };
 
   const handleSwapCard = () => {
     setSwapMode(true);
+    setGlitchMode(false);
+    setToTheMoonMode(false);
     setSelectedMyCard(null);
     setSelectedOpponentCard(null);
+  };
+
+  const handlePeekCard = () => {
+    ws.current.emit('USE_SPECIAL_CARD', {
+      roomId,
+      playerId,
+      cardType: 'peek',
+      data: {}
+    });
+    setShowSpecialCards(false);
+  };
+
+  const handleOracleCard = () => {
+    ws.current.emit('USE_SPECIAL_CARD', {
+      roomId,
+      playerId,
+      cardType: 'oracle',
+      data: {}
+    });
+    setShowSpecialCards(false);
+  };
+
+  const handleStatisticCard = () => {
+    ws.current.emit('USE_SPECIAL_CARD', {
+      roomId,
+      playerId,
+      cardType: 'statistic',
+      data: {}
+    });
+    setShowSpecialCards(false);
+  };
+
+  const handleGlitchCard = () => {
+    setGlitchMode(true);
+    setSwapMode(false);
+    setToTheMoonMode(false);
+    setSelectedOpponentCard(null);
+  };
+
+  const handleToTheMoonCard = () => {
+    setToTheMoonMode(true);
+    setSwapMode(false);
+    setGlitchMode(false);
+    setSelectedMyCard(null);
+    setSelectedValue(null);
   };
 
   const confirmSwap = () => {
@@ -165,7 +249,6 @@ const App = () => {
           opponentCardIndex: selectedOpponentCard
         }
       });
-      // Reset swap mode
       setSwapMode(false);
       setSelectedMyCard(null);
       setSelectedOpponentCard(null);
@@ -173,10 +256,47 @@ const App = () => {
     }
   };
 
-  const cancelSwap = () => {
+  const confirmGlitch = () => {
+    if (selectedOpponentCard !== null) {
+      ws.current.emit('USE_SPECIAL_CARD', {
+        roomId,
+        playerId,
+        cardType: 'glitch',
+        data: {
+          targetCardIndex: selectedOpponentCard
+        }
+      });
+      setGlitchMode(false);
+      setSelectedOpponentCard(null);
+      setShowSpecialCards(false);
+    }
+  };
+
+  const confirmToTheMoon = () => {
+    if (selectedMyCard !== null && selectedValue !== null) {
+      ws.current.emit('USE_SPECIAL_CARD', {
+        roomId,
+        playerId,
+        cardType: 'tothemoon',
+        data: {
+          myCardIndex: selectedMyCard,
+          newValue: selectedValue
+        }
+      });
+      setToTheMoonMode(false);
+      setSelectedMyCard(null);
+      setSelectedValue(null);
+      setShowSpecialCards(false);
+    }
+  };
+
+  const cancelSpecialMode = () => {
     setSwapMode(false);
+    setGlitchMode(false);
+    setToTheMoonMode(false);
     setSelectedMyCard(null);
     setSelectedOpponentCard(null);
+    setSelectedValue(null);
   };
 
   const Card = ({ card, hidden, clickable, selected, onClick }) => (
@@ -361,6 +481,22 @@ const App = () => {
             </div>
           )}
 
+          {specialCardResult && (
+            <div className="bg-gradient-to-br from-cyan-500 to-blue-600 text-white px-6 py-4 rounded-xl mb-5 shadow-lg animate-[fadeIn_0.3s_ease-out]">
+              <div className="font-bold text-xl mb-2">✨ {specialCardResult.message}</div>
+              {specialCardResult.card && (
+                <div className="flex justify-center mt-3">
+                  <Card card={specialCardResult.card} hidden={false} />
+                </div>
+              )}
+              {specialCardResult.stats && (
+                <div className="text-sm mt-2 bg-white/20 p-3 rounded-lg font-mono">
+                  {specialCardResult.stats}
+                </div>
+              )}
+            </div>
+          )}
+
           {swapMode && (
             <div className="bg-gradient-to-br from-purple-500 to-pink-500 text-white px-6 py-4 rounded-xl mb-5 text-center font-semibold text-lg shadow-lg">
               🔄 Swap Mode: Select one of your cards, then one opponent card
@@ -377,7 +513,72 @@ const App = () => {
                   ✓ Confirm Swap
                 </button>
                 <button
-                  onClick={cancelSwap}
+                  onClick={cancelSpecialMode}
+                  className="px-6 py-2 rounded-lg font-bold bg-red-600 hover:bg-red-700"
+                >
+                  ✗ Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {glitchMode && (
+            <div className="bg-gradient-to-br from-yellow-500 to-orange-500 text-white px-6 py-4 rounded-xl mb-5 text-center font-semibold text-lg shadow-lg">
+              ⚡ Glitch Mode: Select an opponent's card to randomize its value
+              <div className="flex gap-3 justify-center mt-3">
+                <button
+                  onClick={confirmGlitch}
+                  disabled={selectedOpponentCard === null}
+                  className={`px-6 py-2 rounded-lg font-bold ${
+                    selectedOpponentCard !== null
+                      ? 'bg-green-600 hover:bg-green-700 cursor-pointer'
+                      : 'bg-gray-400 cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  ✓ Confirm Glitch
+                </button>
+                <button
+                  onClick={cancelSpecialMode}
+                  className="px-6 py-2 rounded-lg font-bold bg-red-600 hover:bg-red-700"
+                >
+                  ✗ Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {toTheMoonMode && (
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-6 py-4 rounded-xl mb-5 text-center font-semibold text-lg shadow-lg">
+              🚀 ToTheMoon Mode: Select your card and choose new value (1-11)
+              <div className="flex gap-2 justify-center mt-3 mb-3 flex-wrap">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(val => (
+                  <button
+                    key={val}
+                    onClick={() => setSelectedValue(val)}
+                    className={`px-3 py-2 rounded-lg font-bold ${
+                      selectedValue === val
+                        ? 'bg-yellow-400 text-black'
+                        : 'bg-white/20 hover:bg-white/30'
+                    }`}
+                  >
+                    {val}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={confirmToTheMoon}
+                  disabled={selectedMyCard === null || selectedValue === null}
+                  className={`px-6 py-2 rounded-lg font-bold ${
+                    selectedMyCard !== null && selectedValue !== null
+                      ? 'bg-green-600 hover:bg-green-700 cursor-pointer'
+                      : 'bg-gray-400 cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  ✓ Confirm Change
+                </button>
+                <button
+                  onClick={cancelSpecialMode}
                   className="px-6 py-2 rounded-lg font-bold bg-red-600 hover:bg-red-700"
                 >
                   ✗ Cancel
@@ -410,9 +611,9 @@ const App = () => {
                   key={idx} 
                   card={card} 
                   hidden={idx === 0 && !gameState.gameOver}
-                  clickable={swapMode && !(idx === 0 && !gameState.gameOver)}
+                  clickable={(swapMode || glitchMode) && !(idx === 0 && !gameState.gameOver)}
                   selected={selectedOpponentCard === idx}
-                  onClick={() => swapMode && !(idx === 0 && !gameState.gameOver) && setSelectedOpponentCard(idx)}
+                  onClick={() => (swapMode || glitchMode) && !(idx === 0 && !gameState.gameOver) && setSelectedOpponentCard(idx)}
                 />
               ))}
             </div>
@@ -502,9 +703,9 @@ const App = () => {
                   key={idx} 
                   card={card} 
                   hidden={false}
-                  clickable={swapMode}
+                  clickable={swapMode || toTheMoonMode}
                   selected={selectedMyCard === idx}
-                  onClick={() => swapMode && setSelectedMyCard(idx)}
+                  onClick={() => (swapMode || toTheMoonMode) && setSelectedMyCard(idx)}
                 />
               ))}
             </div>
@@ -559,47 +760,47 @@ const App = () => {
                   </button>
                   
                   <button
-                    disabled
-                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                    onClick={handlePeekCard}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
                   >
                     <div className="text-2xl mb-2">👁️</div>
-                    <div className="font-bold text-lg mb-1">The Peek (Coming Soon)</div>
+                    <div className="font-bold text-lg mb-1">The Peek</div>
                     <div className="text-sm opacity-90">Reveal the next card in the deck</div>
                   </button>
                   
                   <button
-                    disabled
-                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                    onClick={handleOracleCard}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
                   >
                     <div className="text-2xl mb-2">🔮</div>
-                    <div className="font-bold text-lg mb-1">The Oracle (Coming Soon)</div>
+                    <div className="font-bold text-lg mb-1">The Oracle</div>
                     <div className="text-sm opacity-90">See opponent's hidden card</div>
                   </button>
                   
                   <button
-                    disabled
-                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                    onClick={handleStatisticCard}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
                   >
                     <div className="text-2xl mb-2">📊</div>
-                    <div className="font-bold text-lg mb-1">The Statistic (Coming Soon)</div>
+                    <div className="font-bold text-lg mb-1">The Statistic</div>
                     <div className="text-sm opacity-90">View remaining deck statistics</div>
                   </button>
                   
                   <button
-                    disabled
-                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                    onClick={handleGlitchCard}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
                   >
                     <div className="text-2xl mb-2">⚡</div>
-                    <div className="font-bold text-lg mb-1">The Glitch (Coming Soon)</div>
+                    <div className="font-bold text-lg mb-1">The Glitch</div>
                     <div className="text-sm opacity-90">Randomly change opponent's card value</div>
                   </button>
                   
                   <button
-                    disabled
-                    className="bg-white/10 p-4 rounded-xl text-left opacity-50 cursor-not-allowed"
+                    onClick={handleToTheMoonCard}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm p-4 rounded-xl text-left transition-all hover:scale-105 active:scale-95"
                   >
                     <div className="text-2xl mb-2">🚀</div>
-                    <div className="font-bold text-lg mb-1">ToTheMoon (Coming Soon)</div>
+                    <div className="font-bold text-lg mb-1">ToTheMoon</div>
                     <div className="text-sm opacity-90">Change any of your card values</div>
                   </button>
                 </div>
